@@ -1,0 +1,28 @@
+{
+  "devices": [
+    {"id": "internet", "label": "Internet", "type": "cloud", "layer": "internet", "ip": ""},
+    {"id": "fw-01", "label": "Palo Alto FW-01", "type": "firewall", "layer": "edge", "ip": "203.0.113.1", "platform": "Palo Alto PA-3050"},
+    {"id": "core-01", "label": "Core-SW-01", "type": "switch", "layer": "core", "ip": "10.0.0.1", "platform": "Cisco Catalyst 6509"},
+    {"id": "core-02", "label": "Core-SW-02", "type": "switch", "layer": "core", "ip": "10.0.0.2", "platform": "Cisco Catalyst 6509"},
+    {"id": "dist-01", "label": "Dist-SW-01", "type": "switch", "layer": "distribution", "ip": "10.1.0.1", "platform": "Cisco Catalyst 4507"},
+    {"id": "dist-02", "label": "Dist-SW-02", "type": "switch", "layer": "distribution", "ip": "10.1.0.2", "platform": "Cisco Catalyst 4507"},
+    {"id": "acc-01", "label": "Access-SW-01", "type": "switch", "layer": "access", "ip": "10.2.0.1", "platform": "Cisco Catalyst 3560"},
+    {"id": "acc-02", "label": "Access-SW-02", "type": "switch", "layer": "access", "ip": "10.2.0.2", "platform": "Cisco Catalyst 3560"},
+    {"id": "acc-03", "label": "Access-SW-03", "type": "switch", "layer": "access", "ip": "10.2.0.3", "platform": "Cisco Catalyst 3750"},
+    {"id": "rtr-01", "label": "Edge-RTR-01", "type": "router", "layer": "edge", "ip": "10.0.1.1", "platform": "Cisco ASR1002"},
+    {"id": "ap-01", "label": "AP Cluster", "type": "wireless", "layer": "access", "ip": "10.2.1.1", "platform": "Cisco 5500 WLC"}
+  ],
+  "links": [
+    {"source": "internet", "target": "fw-01", "protocol": "BGP", "bandwidth": "1G"},
+    {"source": "internet", "target": "rtr-01", "protocol": "BGP", "bandwidth": "1G"},
+    {"source": "fw-01", "target": "core-01", "protocol": "OSPF", "src_iface": "Eth1/1", "dst_iface": "Gi1/0/1", "bandwidth": "10G"},
+    {"source": "rtr-01", "target": "core-01", "protocol": "OSPF", "src_iface": "Gi0/0", "dst_iface": "Gi1/0/2", "bandwidth": "10G"},
+    {"source": "core-01", "target": "core-02", "protocol": "OSPF", "src_iface": "Gi2/0/1", "dst_iface": "Gi2/0/1", "bandwidth": "10G"},
+    {"source": "core-01", "target": "dist-01", "protocol": "OSPF", "src_iface": "Gi1/1/1", "dst_iface": "Gi1/0/24", "bandwidth": "10G"},
+    {"source": "core-02", "target": "dist-02", "protocol": "OSPF", "src_iface": "Gi1/1/1", "dst_iface": "Gi1/0/24", "bandwidth": "10G"},
+    {"source": "dist-01", "target": "acc-01", "protocol": "STP", "src_iface": "Gi1/0/1", "dst_iface": "Gi0/1", "bandwidth": "1G"},
+    {"source": "dist-01", "target": "acc-02", "protocol": "STP", "src_iface": "Gi1/0/2", "dst_iface": "Gi0/1", "bandwidth": "1G"},
+    {"source": "dist-02", "target": "acc-03", "protocol": "STP", "src_iface": "Gi1/0/1", "dst_iface": "Gi0/1", "bandwidth": "1G"},
+    {"source": "dist-02", "target": "ap-01", "protocol": "CAPWAP", "src_iface": "Gi1/0/3", "dst_iface": "Gi0/1", "bandwidth": "1G"}
+  ]
+}

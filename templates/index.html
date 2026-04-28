@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Topology Visualizer</title>
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>Network Topology Visualizer</h1>
+        <p class="subtitle">Interactive multi-layer network diagram</p>
+      </div>
+      <div class="header-actions">
+        <label class="upload-btn">
+          &#128194; Upload JSON/YAML
+          <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
+        </label>
+        <button class="action-btn" onclick="loadSample()">Load Sample</button>
+        <a href="https://github.com/EmmanuelPoe/network-topology-visualizer" target="_blank" class="gh-link">&#128279; GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <div class="controls">
+      <div class="control-section">
+        <p class="control-label">Layout</p>
+        <button class="ctrl-btn active" onclick="setLayout('hierarchical')">Hierarchical</button>
+        <button class="ctrl-btn" onclick="setLayout('free')">Free</button>
+      </div>
+      <div class="control-section">
+        <p class="control-label">Legend</p>
+        <div class="legend-item"><span class="legend-dot router"></span>Router</div>
+        <div class="legend-item"><span class="legend-dot switch"></span>Switch</div>
+        <div class="legend-item"><span class="legend-dot firewall"></span>Firewall</div>
+        <div class="legend-item"><span class="legend-dot wireless"></span>Wireless</div>
+        <div class="legend-item"><span class="legend-dot cloud"></span>Cloud/Internet</div>
+      </div>
+      <div class="control-section">
+        <p class="control-label">Stats</p>
+        <div id="stats" class="stats">No topology loaded</div>
+      </div>
+    </div>
+
+    <div id="network-container"></div>
+
+    <div class="detail-panel" id="detail-panel">
+      <h3 id="detail-title">Select a device</h3>
+      <div id="detail-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
