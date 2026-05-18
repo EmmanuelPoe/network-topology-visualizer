@@ -4,10 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Network Topology Visualizer</title>
+  <meta name="description" content="Interactive multi-layer network topology diagram. Upload a JSON or YAML inventory and visualize your network in seconds.">
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+  <!-- Toast container -->
+  <div id="toast-container" aria-live="polite"></div>
+
   <header>
     <div class="header-inner">
       <div>
@@ -15,11 +20,16 @@
         <p class="subtitle">Interactive multi-layer network diagram</p>
       </div>
       <div class="header-actions">
-        <label class="upload-btn">
+        <label class="upload-btn" id="upload-label">
           &#128194; Upload JSON/YAML
           <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
         </label>
         <button class="action-btn" onclick="loadSample()">Load Sample</button>
+        <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
+        <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
+        <div class="live-indicator hidden" id="live-indicator" title="Live topology feed active">
+          <span class="live-dot"></span><span>LIVE</span>
+        </div>
         <a href="https://github.com/EmmanuelPoe/network-topology-visualizer" target="_blank" class="gh-link">&#128279; GitHub</a>
       </div>
     </div>
@@ -27,11 +37,49 @@
 
   <div class="app-body">
     <div class="controls">
+
       <div class="control-section">
         <p class="control-label">Layout</p>
-        <button class="ctrl-btn active" onclick="setLayout('hierarchical')">Hierarchical</button>
-        <button class="ctrl-btn" onclick="setLayout('free')">Free</button>
+        <button class="ctrl-btn active" data-layout="hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
+        <button class="ctrl-btn" data-layout="free" onclick="setLayout('free')">Free</button>
+        <hr class="ctrl-divider">
+        <p class="control-sublabel">Server Layout (NetworkX)</p>
+        <select id="server-algorithm" class="algorithm-select" title="Choose a server-side layout algorithm">
+          <option value="spring">Spring (Force-directed)</option>
+          <option value="kamada_kawai">Kamada-Kawai</option>
+          <option value="circular">Circular</option>
+          <option value="shell">Shell (by layer)</option>
+          <option value="spectral">Spectral</option>
+        </select>
+        <button class="ctrl-btn" id="btn-apply-layout" onclick="computeServerLayout()" disabled>&#9881; Apply</button>
       </div>
+
+      <div class="control-section">
+        <p class="control-label">Search</p>
+        <div class="search-wrap">
+          <input
+            type="text"
+            id="node-search"
+            class="search-input"
+            placeholder="Name, IP, platform…"
+            oninput="searchNodes(this.value)"
+            aria-label="Search devices"
+          >
+          <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">&#10005;</button>
+        </div>
+        <div id="search-results" class="search-results"></div>
+      </div>
+
+      <div class="control-section">
+        <p class="control-label">Layer Filter</p>
+        <button class="ctrl-btn layer-btn active" data-layer="all" onclick="setLayerFilter('all')">All Layers</button>
+        <button class="ctrl-btn layer-btn" data-layer="internet" onclick="setLayerFilter('internet')">Internet</button>
+        <button class="ctrl-btn layer-btn" data-layer="edge" onclick="setLayerFilter('edge')">Edge</button>
+        <button class="ctrl-btn layer-btn" data-layer="core" onclick="setLayerFilter('core')">Core</button>
+        <button class="ctrl-btn layer-btn" data-layer="distribution" onclick="setLayerFilter('distribution')">Distribution</button>
+        <button class="ctrl-btn layer-btn" data-layer="access" onclick="setLayerFilter('access')">Access</button>
+      </div>
+
       <div class="control-section">
         <p class="control-label">Legend</p>
         <div class="legend-item"><span class="legend-dot router"></span>Router</div>
@@ -40,17 +88,34 @@
         <div class="legend-item"><span class="legend-dot wireless"></span>Wireless</div>
         <div class="legend-item"><span class="legend-dot cloud"></span>Cloud/Internet</div>
       </div>
+
+      <div class="control-section">
+        <p class="control-label">View</p>
+        <button class="ctrl-btn" onclick="fitNetwork()">&#8982; Fit to Screen</button>
+      </div>
+
       <div class="control-section">
         <p class="control-label">Stats</p>
         <div id="stats" class="stats">No topology loaded</div>
       </div>
     </div>
 
-    <div id="network-container"></div>
+    <div id="network-container">
+      <div id="canvas-loading" class="canvas-loading hidden">
+        <div class="spinner"></div>
+        <p>Loading topology…</p>
+      </div>
+    </div>
 
     <div class="detail-panel" id="detail-panel">
-      <h3 id="detail-title">Select a device</h3>
-      <div id="detail-body"></div>
+      <div class="detail-empty" id="detail-empty">
+        <div class="detail-empty-icon">&#128246;</div>
+        <p>Click a device or<br>link to inspect it</p>
+      </div>
+      <div id="detail-content" class="hidden">
+        <h3 id="detail-title"></h3>
+        <div id="detail-body"></div>
+      </div>
     </div>
   </div>
 
