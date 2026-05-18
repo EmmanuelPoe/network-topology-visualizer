@@ -1,22 +1,23 @@
 # Network Topology Visualizer
 
-Upload a network inventory (JSON or YAML) and get an interactive, zoomable topology diagram. Supports multi-layer visualizations (L2, L3, and logical overlays).
+Upload a network inventory (JSON or YAML) or build one from scratch using the Interactive GUI Editor. Get an interactive, zoomable topology diagram featuring custom dark-mode SVG device icons and multi-layer filtering.
+
+![GUI Editor Demo](docs/gui-editor-demo.png)
 
 ## Features
 
-- **Interactive Diagram** — drag nodes, zoom, pan; click a device to see its config details
-- **Layer Toggle** — switch between L2 (VLAN), L3 (routing), and physical views
-- **Auto-Layout** — hierarchical layout (core → distribution → access) or free-form
-- **Link Annotations** — shows protocol (OSPF/BGP/EIGRP), interface names, and IP addresses on links
-- **Export** — save diagram as PNG or SVG
-- **JSON/YAML Input** — simple inventory format, or import from Nornir hosts.yaml
+- **Interactive GUI Builder** — Build networks dynamically without writing JSON! Drag and drop nodes, draw connections, and configure device properties (IP, Layer, Type) through sleek popup modals.
+- **Custom Device Icons** — Premium, dark-mode native SVG icons for Routers, Switches, Firewalls, Wireless APs, and Cloud environments.
+- **Server-Side Layouts** — Leverage Python's `networkx` backend to arrange topologies using advanced algorithms (Spring, Kamada-Kawai, Circular, Shell, Spectral).
+- **Interactive Canvas** — Drag nodes, zoom, pan; click a device or link to see its configuration details in the side panel.
+- **Export Capabilities** — Save your visual diagram as **PNG** or **SVG**, or export your custom-drawn network back to a **JSON** file to use in automation workflows.
+- **Live Search & Layer Filtering** — Quickly find specific devices by IP/Name, and toggle between Core, Distribution, Access, and Edge views.
 
 ## Tech Stack
 
-- Python 3.10+ / FastAPI — backend API
-- [Vis.js Network](https://visjs.github.io/vis-network/) — interactive graph rendering
-- D3.js — custom layouts and link annotations
-- HTML/CSS/JavaScript — frontend
+- Python 3.10+ / FastAPI — backend API & NetworkX layout algorithms
+- [Vis.js Network](https://visjs.github.io/vis-network/) — interactive graph rendering and GUI builder module
+- HTML/CSS/JavaScript — vanilla frontend featuring a premium dark mode aesthetic
 
 ## Inventory Format
 
@@ -59,5 +60,5 @@ Upload a network inventory (JSON or YAML) and get an interactive, zoomable topol
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 # Open http://localhost:8000
-# Upload your inventory JSON or use the sample topology
+# Upload your inventory JSON, use the sample topology, or draw your own!
 ```
