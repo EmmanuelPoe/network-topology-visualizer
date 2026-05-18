@@ -38,7 +38,7 @@ function buildGraph(data) {
     return {
       id: d.id,
       label: d.label + (d.ip ? '\n' + d.ip : ''),
-      level: LAYER_LEVEL[d.layer] || 3,
+      ...(currentLayout === 'hierarchical' && { level: LAYER_LEVEL[d.layer] || 3 }),
       color: {
         background: colors.background,
         border: colors.border,
@@ -51,6 +51,8 @@ function buildGraph(data) {
       shadow: true,
       title: buildNodeTooltip(d),
       _data: d,
+      x: d.x,
+      y: d.y,
     };
   });
 
@@ -155,6 +157,9 @@ function getOptions() {
       enabled: currentLayout === 'free',
       stabilization: { iterations: 150 },
     },
+    layout: {
+      hierarchical: { enabled: false }
+    },
     interaction: {
       hover: true,
       tooltipDelay: 150,
@@ -166,12 +171,15 @@ function getOptions() {
   if (currentLayout === 'hierarchical') {
     base.layout = {
       hierarchical: {
+        enabled: true,
         direction: 'UD',
         sortMethod: 'directed',
         levelSeparation: 110,
         nodeSpacing: 160,
       },
     };
+    base.physics = { enabled: false };
+  } else if (currentLayout === 'server') {
     base.physics = { enabled: false };
   }
   return base;
@@ -185,7 +193,11 @@ function setLayout(layout) {
   document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.layout === layout);
   });
-  if (currentTopology) renderNetwork(currentTopology);
+  if (currentTopology) {
+    // Strip manual coordinates so Vis.js recalculates
+    currentTopology.devices.forEach(d => { delete d.x; delete d.y; });
+    renderNetwork(currentTopology);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,18 +413,30 @@ function enableExportButtons(enabled) {
 
 function exportPNG() {
   if (!network) return;
-  const canvas = network.getCanvas();
+  const canvas = document.querySelector('#network-container canvas');
+  if (!canvas) {
+    alert("Error: Canvas element not found. Please try zooming or moving the graph slightly.");
+    return;
+  }
+  
+  const dataUrl = canvas.toDataURL('image/png');
   const link = document.createElement('a');
   link.download = 'network-topology.png';
-  link.href = canvas.toDataURL('image/png');
+  link.href = dataUrl;
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
   showToast('PNG exported successfully', 'success');
 }
 
 function exportSVG() {
   if (!network) return;
-  // Vis.js renders to a canvas — we convert it to an SVG-wrapped image
-  const canvas = network.getCanvas();
+  const canvas = document.querySelector('#network-container canvas');
+  if (!canvas) {
+    alert("Error: Canvas element not found. Please try zooming or moving the graph slightly.");
+    return;
+  }
+  
   const dataUrl = canvas.toDataURL('image/png');
   const { width, height } = canvas;
   const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -421,12 +445,15 @@ function exportSVG() {
   <rect width="${width}" height="${height}" fill="#0d1117"/>
   <image href="${dataUrl}" x="0" y="0" width="${width}" height="${height}"/>
 </svg>`;
-  const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+  // Force octet-stream so Safari doesn't ignore the file extension
+  const blob = new Blob([svgContent], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.download = 'network-topology.svg';
   link.href = url;
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
   showToast('SVG exported successfully', 'success');
 }
@@ -526,18 +553,22 @@ async function computeServerLayout() {
     }
     const { positions, algorithm: algo } = await resp.json();
 
-    // Switch to free+static mode so Vis.js respects our coordinates
-    currentLayout = 'free';
-    document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.layout === 'free');
+    // Update currentTopology devices with positions
+    currentTopology.devices.forEach(d => {
+      if (positions[d.id]) {
+        d.x = positions[d.id].x;
+        d.y = positions[d.id].y;
+      }
     });
-    network.setOptions({ layout: { hierarchical: false }, physics: { enabled: false } });
 
-    // Apply server positions
-    const updates = nodesDataset.get()
-      .filter(n => positions[n.id])
-      .map(n => ({ id: n.id, x: positions[n.id].x, y: positions[n.id].y }));
-    nodesDataset.update(updates);
+    // Switch to server layout mode
+    currentLayout = 'server';
+    document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
+      btn.classList.remove('active');
+    });
+
+    // Re-render completely with the new coordinates
+    renderNetwork(currentTopology);
 
     setTimeout(() => {
       network.fit({ animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
