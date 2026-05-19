@@ -398,3 +398,33 @@ async def push_topology(
     data = parse_topology(raw)
     client_count = await manager.broadcast(data)
     return JSONResponse({"ok": True, "clients_notified": client_count})
+
+# ---------------------------------------------------------------------------
+# Reliable Export Endpoint
+# ---------------------------------------------------------------------------
+
+from fastapi import Form
+from fastapi.responses import Response
+import base64
+
+@app.post("/api/export")
+async def export_file(
+    filename: str = Form(...),
+    content: str = Form(...),
+    content_type: str = Form(...),
+) -> Response:
+    """
+    Echo endpoint to bypass strict browser (Safari) local Blob download policies.
+    Expects raw text for JSON/SVG, and a Data URI for PNG.
+    """
+    if content.startswith("data:image/png;base64,"):
+        b64_str = content.split(",", 1)[1]
+        data = base64.b64decode(b64_str)
+    else:
+        data = content.encode("utf-8")
+        
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

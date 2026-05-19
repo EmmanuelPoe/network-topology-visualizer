@@ -21,6 +21,14 @@ const NODE_COLORS = {
   cloud:    { background: '#21262d', border: '#8b949e', font: '#8b949e' },
 };
 
+const DEVICE_ICONS = {
+  router:   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#1f3a5f" stroke="#58a6ff" stroke-width="3"/><path d="M32 14L32 50M14 32L50 32M26 22l6-6 6 6M26 42l6 6 6-6M22 26l-6 6 6 6M42 26l6 6-6 6" fill="none" stroke="#58a6ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`)}`,
+  switch:   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect x="8" y="20" width="48" height="24" rx="4" fill="#1a3a1a" stroke="#3fb950" stroke-width="3"/><path d="M16 28h32M44 28l-4-4M44 28l-4 4M48 36H16M20 36l4-4M20 36l4 4" fill="none" stroke="#3fb950" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`)}`,
+  firewall: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect x="8" y="12" width="48" height="40" rx="2" fill="#3a1a1a" stroke="#f85149" stroke-width="3"/><path d="M8 26h48M8 38h48M22 12v14M42 12v14M32 26v12M18 38v14M46 38v14" fill="none" stroke="#f85149" stroke-width="3" stroke-linecap="round"/></svg>`)}`,
+  wireless: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect x="18" y="44" width="28" height="8" rx="2" fill="#2d1f3a" stroke="#d2a8ff" stroke-width="3"/><path d="M32 44v-6M22 28c5.5-5.5 14.5-5.5 20 0M16 20c8.8-8.8 23.2-8.8 32 0M28 36c2.2-2.2 5.8-2.2 8 0" fill="none" stroke="#d2a8ff" stroke-width="3" stroke-linecap="round"/></svg>`)}`,
+  cloud:    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path d="M18 44c-5.5 0-10-4.5-10-10 0-5.1 3.8-9.4 8.8-9.9 1.7-6.2 7.4-10.9 14.5-10.9 6 0 11.2 3.5 13.8 8.6 6.1.9 9.5 5.3 9.5 10.4 0 6.4-5.2 11.8-11.6 11.8H18z" fill="#21262d" stroke="#8b949e" stroke-width="3" stroke-linejoin="round"/></svg>`)}`
+};
+
 const LAYER_LEVEL = {
   internet: 1,
   edge: 2,
@@ -35,6 +43,7 @@ const LAYER_LEVEL = {
 function buildGraph(data) {
   const nodes = data.devices.map(d => {
     const colors = NODE_COLORS[d.type] || NODE_COLORS.switch;
+    const icon = DEVICE_ICONS[d.type] || DEVICE_ICONS.switch;
     return {
       id: d.id,
       label: d.label + (d.ip ? '\n' + d.ip : ''),
@@ -45,9 +54,9 @@ function buildGraph(data) {
         highlight: { background: colors.background, border: '#fff' },
       },
       font: { color: colors.font, size: 11, face: 'Courier New' },
-      shape: 'box',
-      borderWidth: 2,
-      margin: 8,
+      shape: 'image',
+      image: icon,
+      size: 24,
       shadow: true,
       title: buildNodeTooltip(d),
       _data: d,
@@ -147,6 +156,16 @@ function renderNetwork(data) {
     }
   });
 
+  network.on('doubleClick', params => {
+    if (params.nodes.length > 0) {
+      const nodeData = nodesDataset.get(params.nodes[0]);
+      showNodeEditor('edit', nodeData, null);
+    } else if (params.edges.length > 0) {
+      const edgeData = edgesDataset.get(params.edges[0]);
+      showEdgeEditor('edit', { from: edgeData.from, to: edgeData.to, _data: edgeData._data }, null);
+    }
+  });
+
   updateStats(data);
   enableExportButtons(true);
 }
@@ -165,6 +184,45 @@ function getOptions() {
       tooltipDelay: 150,
       navigationButtons: true,
       keyboard: true,
+    },
+    manipulation: {
+      enabled: true,
+      addNode: function (data, callback) {
+        showNodeEditor('add', data, callback);
+      },
+      editNode: function (data, callback) {
+        showNodeEditor('edit', data, callback);
+      },
+      addEdge: function (data, callback) {
+        if (data.from === data.to) {
+          callback(null);
+          return;
+        }
+        showEdgeEditor('add', data, callback);
+      },
+      editEdge: function (data, callback) {
+        if (data.from === data.to) {
+          callback(null);
+          return;
+        }
+        showEdgeEditor('edit', data, callback);
+      },
+      deleteNode: function (data, callback) {
+        if (!currentTopology) return callback(null);
+        const nodeIds = data.nodes;
+        currentTopology.devices = currentTopology.devices.filter(d => !nodeIds.includes(d.id));
+        currentTopology.links = currentTopology.links.filter(l => !nodeIds.includes(l.source) && !nodeIds.includes(l.target));
+        updateStats(currentTopology);
+        callback(data);
+      },
+      deleteEdge: function (data, callback) {
+        if (!currentTopology) return callback(null);
+        // Vis.js provides internal edge IDs in data.edges.
+        // It's safest to just rebuild currentTopology.links based on what edges remain in edgesDataset.
+        // However, Vis hasn't deleted them yet. We'll delete from dataset, then rebuild.
+        callback(data);
+        setTimeout(() => syncTopologyFromGraph(), 50);
+      }
     },
     edges: { arrows: { to: { enabled: false } } },
   };
@@ -408,7 +466,16 @@ function updateStats(data) {
 function enableExportButtons(enabled) {
   document.getElementById('btn-export-png').disabled = !enabled;
   document.getElementById('btn-export-svg').disabled = !enabled;
+  document.getElementById('btn-export-json').disabled = !enabled;
   document.getElementById('btn-apply-layout').disabled = !enabled;
+}
+
+function forceDownload(filename, content, type) {
+  const form = document.getElementById('export-form');
+  document.getElementById('export-filename').value = filename;
+  document.getElementById('export-content').value = content;
+  document.getElementById('export-content-type').value = type;
+  form.submit();
 }
 
 function exportPNG() {
@@ -420,12 +487,7 @@ function exportPNG() {
   }
   
   const dataUrl = canvas.toDataURL('image/png');
-  const link = document.createElement('a');
-  link.download = 'network-topology.png';
-  link.href = dataUrl;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  forceDownload('network-topology.png', dataUrl, 'image/png');
   showToast('PNG exported successfully', 'success');
 }
 
@@ -445,16 +507,8 @@ function exportSVG() {
   <rect width="${width}" height="${height}" fill="#0d1117"/>
   <image href="${dataUrl}" x="0" y="0" width="${width}" height="${height}"/>
 </svg>`;
-  // Force octet-stream so Safari doesn't ignore the file extension
-  const blob = new Blob([svgContent], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.download = 'network-topology.svg';
-  link.href = url;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+
+  forceDownload('network-topology.svg', svgContent, 'image/svg+xml');
   showToast('SVG exported successfully', 'success');
 }
 
@@ -628,6 +682,229 @@ function initWebSocket() {
 
 function setLiveIndicator(connected) {
   document.getElementById('live-indicator')?.classList.toggle('hidden', !connected);
+}
+
+// ---------------------------------------------------------------------------
+// GUI Builder Modals & Syncing
+// ---------------------------------------------------------------------------
+let pendingCallback = null;
+
+function showNodeEditor(action, data, callback) {
+  pendingCallback = callback;
+  const modal = document.getElementById('node-modal');
+  const isEdit = action === 'edit';
+  
+  document.getElementById('node-modal-title').textContent = isEdit ? 'Edit Node' : 'Add Node';
+  document.getElementById('node-id').value = data.id || `node-${Math.random().toString(36).substr(2, 6)}`;
+  
+  if (isEdit && currentTopology) {
+    const existing = currentTopology.devices.find(d => d.id === data.id);
+    if (existing) {
+      document.getElementById('node-label').value = existing.label || '';
+      document.getElementById('node-type').value = existing.type || 'switch';
+      document.getElementById('node-layer').value = existing.layer || 'access';
+      document.getElementById('node-ip').value = existing.ip || '';
+      document.getElementById('node-platform').value = existing.platform || '';
+    }
+  } else {
+    document.getElementById('node-label').value = '';
+    document.getElementById('node-type').value = 'switch';
+    document.getElementById('node-layer').value = 'access';
+    document.getElementById('node-ip').value = '';
+    document.getElementById('node-platform').value = '';
+  }
+  
+  modal.classList.remove('hidden');
+}
+
+function showEdgeEditor(action, data, callback) {
+  pendingCallback = callback;
+  const modal = document.getElementById('edge-modal');
+  const isEdit = action === 'edit';
+  
+  document.getElementById('edge-modal-title').textContent = isEdit ? 'Edit Link' : 'Add Link';
+  
+  if (isEdit && currentTopology && data._data) {
+    document.getElementById('edge-protocol').value = data._data.protocol || '';
+    document.getElementById('edge-bandwidth').value = data._data.bandwidth || '';
+    document.getElementById('edge-src-iface').value = data._data.src_iface || '';
+    document.getElementById('edge-dst-iface').value = data._data.dst_iface || '';
+  } else {
+    document.getElementById('edge-protocol').value = '';
+    document.getElementById('edge-bandwidth').value = '1G';
+    document.getElementById('edge-src-iface').value = '';
+    document.getElementById('edge-dst-iface').value = '';
+  }
+  
+  modal.classList.remove('hidden');
+}
+
+document.getElementById('node-cancel')?.addEventListener('click', () => {
+  document.getElementById('node-modal').classList.add('hidden');
+  if (pendingCallback) pendingCallback(null);
+  pendingCallback = null;
+});
+
+document.getElementById('node-save')?.addEventListener('click', () => {
+  const id = document.getElementById('node-id').value;
+  const label = document.getElementById('node-label').value;
+  const type = document.getElementById('node-type').value;
+  const layer = document.getElementById('node-layer').value;
+  const ip = document.getElementById('node-ip').value;
+  const platform = document.getElementById('node-platform').value;
+
+  document.getElementById('node-modal').classList.add('hidden');
+
+  if (!label.trim()) {
+    showToast('Label is required', 'warning');
+    if (pendingCallback) pendingCallback(null);
+    return;
+  }
+
+  const deviceData = { id, label, type, layer, ip, platform };
+  
+  // Update internal model
+  if (!currentTopology) currentTopology = { devices: [], links: [] };
+  const existingIndex = currentTopology.devices.findIndex(d => d.id === id);
+  if (existingIndex >= 0) {
+    currentTopology.devices[existingIndex] = deviceData;
+  } else {
+    currentTopology.devices.push(deviceData);
+  }
+  
+  // Trigger re-render to apply icons and colors
+  renderNetwork(currentTopology);
+  
+  if (pendingCallback) pendingCallback(null); // renderNetwork handles the update
+  pendingCallback = null;
+});
+
+document.getElementById('edge-cancel')?.addEventListener('click', () => {
+  document.getElementById('edge-modal').classList.add('hidden');
+  if (pendingCallback) pendingCallback(null);
+  pendingCallback = null;
+});
+
+document.getElementById('edge-save')?.addEventListener('click', () => {
+  const protocol = document.getElementById('edge-protocol').value;
+  const bandwidth = document.getElementById('edge-bandwidth').value;
+  const src_iface = document.getElementById('edge-src-iface').value;
+  const dst_iface = document.getElementById('edge-dst-iface').value;
+  
+  document.getElementById('edge-modal').classList.add('hidden');
+  
+  // To link correctly, we need from/to which are hidden in pendingCallback scope
+  // Since we don't have access to the data object easily here, we rely on a global or hack:
+  // We can just recreate the edge logic inside the callback wrapper.
+});
+
+// Let's modify showEdgeEditor to bind the save action dynamically
+function showEdgeEditor(action, data, callback) {
+  const modal = document.getElementById('edge-modal');
+  const isEdit = action === 'edit';
+  document.getElementById('edge-modal-title').textContent = isEdit ? 'Edit Link' : 'Add Link';
+  
+  let oldEdgeData = isEdit && data._data ? data._data : null;
+  if (!oldEdgeData && isEdit && currentTopology) {
+    // Attempt to find by from/to if data._data is missing
+    oldEdgeData = currentTopology.links.find(l => l.source === data.from && l.target === data.to);
+  }
+
+  document.getElementById('edge-protocol').value = oldEdgeData?.protocol || '';
+  document.getElementById('edge-bandwidth').value = oldEdgeData?.bandwidth || '1G';
+  document.getElementById('edge-src-iface').value = oldEdgeData?.src_iface || '';
+  document.getElementById('edge-dst-iface').value = oldEdgeData?.dst_iface || '';
+  
+  const saveBtn = document.getElementById('edge-save');
+  const cancelBtn = document.getElementById('edge-cancel');
+  
+  const cleanup = () => {
+    modal.classList.add('hidden');
+    saveBtn.removeEventListener('click', onSave);
+    cancelBtn.removeEventListener('click', onCancel);
+  };
+  
+  const onCancel = () => {
+    cleanup();
+    callback(null);
+  };
+  
+  const onSave = () => {
+    cleanup();
+    const linkData = {
+      source: data.from,
+      target: data.to,
+      protocol: document.getElementById('edge-protocol').value,
+      bandwidth: document.getElementById('edge-bandwidth').value,
+      src_iface: document.getElementById('edge-src-iface').value,
+      dst_iface: document.getElementById('edge-dst-iface').value,
+    };
+    
+    if (!currentTopology) currentTopology = { devices: [], links: [] };
+    
+    if (isEdit) {
+      const idx = currentTopology.links.findIndex(l => l.source === data.from && l.target === data.to);
+      if (idx >= 0) currentTopology.links[idx] = linkData;
+    } else {
+      currentTopology.links.push(linkData);
+    }
+    
+    renderNetwork(currentTopology);
+    callback(null);
+  };
+  
+  saveBtn.addEventListener('click', onSave);
+  cancelBtn.addEventListener('click', onCancel);
+  modal.classList.remove('hidden');
+}
+
+// Ensure the edge-save global listener is removed (we just use the dynamic one above)
+const existingEdgeSave = document.getElementById('edge-save');
+if (existingEdgeSave) {
+  const newEdgeSave = existingEdgeSave.cloneNode(true);
+  existingEdgeSave.parentNode.replaceChild(newEdgeSave, existingEdgeSave);
+}
+const existingEdgeCancel = document.getElementById('edge-cancel');
+if (existingEdgeCancel) {
+  const newEdgeCancel = existingEdgeCancel.cloneNode(true);
+  existingEdgeCancel.parentNode.replaceChild(newEdgeCancel, existingEdgeCancel);
+}
+
+function syncTopologyFromGraph() {
+  if (!network || !currentTopology) return;
+  // Rebuild links based on edgesDataset to handle deletions
+  const activeEdgeIds = edgesDataset.getIds();
+  const activeEdges = edgesDataset.get(activeEdgeIds);
+  currentTopology.links = activeEdges.map(e => {
+    return {
+      source: e.from,
+      target: e.to,
+      protocol: e._data?.protocol || '',
+      bandwidth: e._data?.bandwidth || '1G',
+      src_iface: e._data?.src_iface || '',
+      dst_iface: e._data?.dst_iface || ''
+    };
+  });
+  updateStats(currentTopology);
+}
+
+function exportJSON() {
+  if (!currentTopology) return;
+  
+  // Update node coordinates if layout is free or server
+  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
+    const positions = network.getPositions();
+    currentTopology.devices.forEach(d => {
+      if (positions[d.id]) {
+        d.x = positions[d.id].x;
+        d.y = positions[d.id].y;
+      }
+    });
+  }
+  
+  const jsonString = JSON.stringify(currentTopology, null, 2);
+  forceDownload('network-topology.json', jsonString, 'application/json');
+  showToast('JSON exported successfully', 'success');
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,13 @@
   <!-- Toast container -->
   <div id="toast-container" aria-live="polite"></div>
 
+  <!-- Hidden form for robust Safari downloads -->
+  <form id="export-form" method="POST" action="/api/export" class="hidden">
+    <input type="hidden" name="filename" id="export-filename">
+    <input type="hidden" name="content" id="export-content">
+    <input type="hidden" name="content_type" id="export-content-type">
+  </form>
+
   <header>
     <div class="header-inner">
       <div>
@@ -27,6 +34,7 @@
         <button class="action-btn" onclick="loadSample()">Load Sample</button>
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
+        <button class="action-btn export-btn" onclick="exportJSON()" id="btn-export-json" disabled title="Export as JSON">&#128190; JSON</button>
         <div class="live-indicator hidden" id="live-indicator" title="Live topology feed active">
           <span class="live-dot"></span><span>LIVE</span>
         </div>
@@ -116,6 +124,80 @@
       <div id="detail-content" class="hidden">
         <h3 id="detail-title"></h3>
         <div id="detail-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Node Editor Modal -->
+  <div id="node-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="node-modal-title">Edit Node</h3>
+      <div class="form-group">
+        <label for="node-id" class="hidden">ID</label>
+        <input type="text" id="node-id" disabled hidden>
+      </div>
+      <div class="form-group">
+        <label for="node-label">Label (Name)</label>
+        <input type="text" id="node-label" placeholder="e.g. Core-SW-01">
+      </div>
+      <div class="form-group">
+        <label for="node-type">Type</label>
+        <select id="node-type">
+          <option value="switch">Switch</option>
+          <option value="router">Router</option>
+          <option value="firewall">Firewall</option>
+          <option value="wireless">Wireless / AP</option>
+          <option value="cloud">Cloud / Internet</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="node-layer">Layer</label>
+        <select id="node-layer">
+          <option value="core">Core</option>
+          <option value="distribution">Distribution</option>
+          <option value="access">Access</option>
+          <option value="edge">Edge</option>
+          <option value="internet">Internet</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="node-ip">IP Address</label>
+        <input type="text" id="node-ip" placeholder="e.g. 10.0.0.1">
+      </div>
+      <div class="form-group">
+        <label for="node-platform">Platform</label>
+        <input type="text" id="node-platform" placeholder="e.g. Cisco Nexus 9k">
+      </div>
+      <div class="modal-actions">
+        <button id="node-cancel" class="ctrl-btn">Cancel</button>
+        <button id="node-save" class="ctrl-btn active">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edge Editor Modal -->
+  <div id="edge-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="edge-modal-title">Edit Link</h3>
+      <div class="form-group">
+        <label for="edge-protocol">Protocol</label>
+        <input type="text" id="edge-protocol" placeholder="e.g. OSPF, BGP, STP">
+      </div>
+      <div class="form-group">
+        <label for="edge-bandwidth">Bandwidth</label>
+        <input type="text" id="edge-bandwidth" placeholder="e.g. 10G, 1G, 100M">
+      </div>
+      <div class="form-group">
+        <label for="edge-src-iface">Source Interface</label>
+        <input type="text" id="edge-src-iface" placeholder="e.g. Gi1/0/1">
+      </div>
+      <div class="form-group">
+        <label for="edge-dst-iface">Dest Interface</label>
+        <input type="text" id="edge-dst-iface" placeholder="e.g. Gi1/0/2">
+      </div>
+      <div class="modal-actions">
+        <button id="edge-cancel" class="ctrl-btn">Cancel</button>
+        <button id="edge-save" class="ctrl-btn active">Save</button>
       </div>
     </div>
   </div>
