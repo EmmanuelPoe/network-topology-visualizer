@@ -1,7 +1,7 @@
 """Network Topology Visualizer — FastAPI backend."""
 
 from __future__ import annotations
-
+import base64
 import asyncio
 import json
 import os
@@ -13,6 +13,7 @@ import yaml
 from fastapi import (
     FastAPI,
     File,
+    Form,
     Header,
     HTTPException,
     Request,
@@ -20,7 +21,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import Response, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
@@ -399,13 +400,11 @@ async def push_topology(
     client_count = await manager.broadcast(data)
     return JSONResponse({"ok": True, "clients_notified": client_count})
 
+
 # ---------------------------------------------------------------------------
 # Reliable Export Endpoint
 # ---------------------------------------------------------------------------
 
-from fastapi import Form
-from fastapi.responses import Response
-import base64
 
 @app.post("/api/export")
 async def export_file(
@@ -422,9 +421,9 @@ async def export_file(
         data = base64.b64decode(b64_str)
     else:
         data = content.encode("utf-8")
-        
+
     return Response(
         content=data,
         media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

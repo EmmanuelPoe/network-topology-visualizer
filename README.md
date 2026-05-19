@@ -57,8 +57,8 @@ Upload a network inventory (JSON or YAML) or build one from scratch using the In
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+make setup
+make run
 # Open http://localhost:8000
 # Upload your inventory JSON, use the sample topology, or draw your own!
 ```
