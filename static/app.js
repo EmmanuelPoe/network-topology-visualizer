@@ -145,6 +145,7 @@ function renderNetwork(data) {
   network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, getOptions());
 
   network.on('click', params => {
+    hideContextMenu();
     if (params.nodes.length > 0) {
       const node = nodesDataset.get(params.nodes[0]);
       showDeviceDetail(node._data, data.links);
@@ -163,6 +164,39 @@ function renderNetwork(data) {
     } else if (params.edges.length > 0) {
       const edgeData = edgesDataset.get(params.edges[0]);
       showEdgeEditor('edit', { from: edgeData.from, to: edgeData.to, _data: edgeData._data }, null);
+    }
+  });
+
+  network.on('oncontext', params => {
+    params.event.preventDefault();
+    const menu = document.getElementById('context-menu');
+    const copyBtn = document.getElementById('menu-copy');
+    const pasteBtn = document.getElementById('menu-paste');
+    
+    menu.style.left = params.event.clientX + 'px';
+    menu.style.top = params.event.clientY + 'px';
+    menu.classList.remove('hidden');
+    
+    pastePosition = params.pointer.canvas;
+    
+    const nodeId = network.getNodeAt(params.pointer.DOM);
+    if (nodeId) {
+      const nodeData = nodesDataset.get(nodeId);
+      if (nodeData && nodeData._data) {
+        menuSelectedNodeData = nodeData._data;
+        copyBtn.classList.remove('disabled');
+      } else {
+        copyBtn.classList.add('disabled');
+      }
+    } else {
+      menuSelectedNodeData = null;
+      copyBtn.classList.add('disabled');
+    }
+    
+    if (copiedNodeData) {
+      pasteBtn.classList.remove('disabled');
+    } else {
+      pasteBtn.classList.add('disabled');
     }
   });
 
@@ -543,6 +577,20 @@ function setLoading(loading) {
 // ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------
+function clearLayout() {
+  renderNetwork({ devices: [], links: [] });
+  showToast('Started new empty topology', 'success');
+}
+
+function stopAdding() {
+  if (network) {
+    network.disableEditMode();
+    network.enableEditMode();
+    document.getElementById('btn-done-adding')?.classList.add('hidden');
+    showToast('Exited add mode');
+  }
+}
+
 async function loadSample() {
   setLoading(true);
   try {
@@ -685,12 +733,47 @@ function setLiveIndicator(connected) {
 }
 
 // ---------------------------------------------------------------------------
+// Context Menu
+// ---------------------------------------------------------------------------
+let copiedNodeData = null;
+let pastePosition = null;
+let menuSelectedNodeData = null;
+let pendingPastePosition = null;
+
+function hideContextMenu() {
+  document.getElementById('context-menu')?.classList.add('hidden');
+}
+
+function handleMenuCopy() {
+  hideContextMenu();
+  if (menuSelectedNodeData) {
+    copiedNodeData = menuSelectedNodeData;
+    showToast('Node copied', 'success');
+  }
+}
+
+function handleMenuPaste() {
+  hideContextMenu();
+  if (copiedNodeData && pastePosition) {
+    const copyData = { 
+      ...copiedNodeData, 
+      id: '', 
+      label: copiedNodeData.label + ' (copy)'
+    };
+    pendingPastePosition = pastePosition;
+    showNodeEditor('add', copyData, null);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GUI Builder Modals & Syncing
 // ---------------------------------------------------------------------------
 let pendingCallback = null;
+let pendingNodeAction = null;
 
 function showNodeEditor(action, data, callback) {
   pendingCallback = callback;
+  pendingNodeAction = action;
   const modal = document.getElementById('node-modal');
   const isEdit = action === 'edit';
   
@@ -707,11 +790,11 @@ function showNodeEditor(action, data, callback) {
       document.getElementById('node-platform').value = existing.platform || '';
     }
   } else {
-    document.getElementById('node-label').value = '';
-    document.getElementById('node-type').value = 'switch';
-    document.getElementById('node-layer').value = 'access';
-    document.getElementById('node-ip').value = '';
-    document.getElementById('node-platform').value = '';
+    document.getElementById('node-label').value = data.label || '';
+    document.getElementById('node-type').value = data.type || 'switch';
+    document.getElementById('node-layer').value = data.layer || 'access';
+    document.getElementById('node-ip').value = data.ip || '';
+    document.getElementById('node-platform').value = data.platform || '';
   }
   
   modal.classList.remove('hidden');
@@ -763,6 +846,12 @@ document.getElementById('node-save')?.addEventListener('click', () => {
 
   const deviceData = { id, label, type, layer, ip, platform };
   
+  if (pendingPastePosition) {
+    deviceData.x = pendingPastePosition.x;
+    deviceData.y = pendingPastePosition.y;
+    pendingPastePosition = null;
+  }
+  
   // Update internal model
   if (!currentTopology) currentTopology = { devices: [], links: [] };
   const existingIndex = currentTopology.devices.findIndex(d => d.id === id);
@@ -772,11 +861,20 @@ document.getElementById('node-save')?.addEventListener('click', () => {
     currentTopology.devices.push(deviceData);
   }
   
-  // Trigger re-render to apply icons and colors
-  renderNetwork(currentTopology);
+  const { nodes, edges } = buildGraph(currentTopology);
+  nodesDataset.update(nodes);
+  edgesDataset.update(edges);
+  updateStats(currentTopology);
   
-  if (pendingCallback) pendingCallback(null); // renderNetwork handles the update
+  if (pendingCallback) pendingCallback(null);
   pendingCallback = null;
+
+  if (pendingNodeAction === 'add' && network) {
+    setTimeout(() => { 
+      network.addNodeMode(); 
+      document.getElementById('btn-done-adding')?.classList.remove('hidden');
+    }, 50);
+  }
 });
 
 document.getElementById('edge-cancel')?.addEventListener('click', () => {
@@ -849,8 +947,19 @@ function showEdgeEditor(action, data, callback) {
       currentTopology.links.push(linkData);
     }
     
-    renderNetwork(currentTopology);
+    const { nodes, edges } = buildGraph(currentTopology);
+    nodesDataset.update(nodes);
+    edgesDataset.update(edges);
+    updateStats(currentTopology);
+
     callback(null);
+
+    if (!isEdit && network) {
+      setTimeout(() => { 
+        network.addEdgeMode(); 
+        document.getElementById('btn-done-adding')?.classList.remove('hidden');
+      }, 50);
+    }
   };
   
   saveBtn.addEventListener('click', onSave);
@@ -925,9 +1034,22 @@ document.addEventListener('keydown', e => {
     }
     return;
   }
+  if (e.key === 'Escape' && network) {
+    stopAdding();
+  }
   if (e.key === 'f' || e.key === 'F') fitNetwork();
   if (e.key === '/') {
     e.preventDefault();
     document.getElementById('node-search').focus();
+  }
+});
+
+// Catch vis.js manipulation toolbar clicks to show/hide the Done button
+document.addEventListener('click', e => {
+  if (!e.target || !e.target.classList) return;
+  if (e.target.classList.contains('vis-back')) {
+    document.getElementById('btn-done-adding')?.classList.add('hidden');
+  } else if (e.target.classList.contains('vis-add') || e.target.classList.contains('vis-addEdge')) {
+    document.getElementById('btn-done-adding')?.classList.remove('hidden');
   }
 });

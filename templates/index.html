@@ -27,6 +27,8 @@
         <p class="subtitle">Interactive multi-layer network diagram</p>
       </div>
       <div class="header-actions">
+        <button class="action-btn" onclick="clearLayout()">&#10010; New</button>
+        <button id="btn-done-adding" class="action-btn hidden" onclick="stopAdding()" title="Finish adding nodes/edges">&#10004; Done Adding</button>
         <label class="upload-btn" id="upload-label">
           &#128194; Upload JSON/YAML
           <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
@@ -34,7 +36,7 @@
         <button class="action-btn" onclick="loadSample()">Load Sample</button>
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
-        <button class="action-btn export-btn" onclick="exportJSON()" id="btn-export-json" disabled title="Export as JSON">&#128190; JSON</button>
+        <button class="action-btn export-btn" onclick="exportJSON()" id="btn-export-json" disabled title="Save diagram as JSON">&#128190; Save JSON</button>
         <div class="live-indicator hidden" id="live-indicator" title="Live topology feed active">
           <span class="live-dot"></span><span>LIVE</span>
         </div>
@@ -200,6 +202,12 @@
         <button id="edge-save" class="ctrl-btn active">Save</button>
       </div>
     </div>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <div class="menu-item" id="menu-copy" onclick="handleMenuCopy()">Copy</div>
+    <div class="menu-item" id="menu-paste" onclick="handleMenuPaste()">Paste</div>
   </div>
 
   <script src="/static/app.js"></script>

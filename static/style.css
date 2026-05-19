@@ -507,3 +507,33 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
 .vis-network .vis-manipulation .vis-separator-line {
   background-color: #30363d !important;
 }
+
+/* ============================================================
+   Context Menu
+   ============================================================ */
+.context-menu {
+  position: absolute;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 2000;
+  min-width: 120px;
+}
+.context-menu.hidden { display: none !important; }
+.menu-item {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  color: #c9d1d9;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.menu-item:hover {
+  background: #1f6feb;
+  color: #ffffff;
+}
+.menu-item.disabled {
+  color: #484f58;
+  pointer-events: none;
+}
