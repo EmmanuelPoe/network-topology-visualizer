@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  test-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.test_router
+    container_name: test_router_sim
+    ports:
+      - "2222:22"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    restart: unless-stopped

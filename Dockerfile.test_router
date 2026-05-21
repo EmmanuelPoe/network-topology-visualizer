@@ -1,0 +1,43 @@
+FROM frrouting/frr:latest
+
+# Install SSH server
+RUN apk add --no-cache openssh
+
+# Generate SSH host keys
+RUN ssh-keygen -A
+
+# Create user cisco with password cisco and set shell to vtysh
+RUN adduser -D -s /usr/bin/vtysh cisco && \
+    echo "cisco:cisco" | chpasswd && \
+    addgroup cisco frr && \
+    addgroup cisco frrvty && \
+    echo "/usr/bin/vtysh" >> /etc/shells
+
+# Configure SSH daemon to allow password auth
+RUN echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config
+
+# Create empty vtysh.conf to suppress warning
+RUN touch /etc/frr/vtysh.conf && \
+    chown frr:frrvty /etc/frr/vtysh.conf
+
+# Enable OSPF, BGP, RIP, and Static routing daemons in FRR config
+RUN sed -i 's/ospfd=no/ospfd=yes/g' /etc/frr/daemons && \
+    sed -i 's/bgpd=no/bgpd=yes/g' /etc/frr/daemons && \
+    sed -i 's/ripd=no/ripd=yes/g' /etc/frr/daemons && \
+    sed -i 's/staticd=no/staticd=yes/g' /etc/frr/daemons
+
+EXPOSE 22
+
+# Entrypoint script to start SSH daemon and then execution of watchfrr
+COPY <<-"EOF" /entrypoint.sh
+#!/bin/sh
+# Start SSH daemon
+/usr/sbin/sshd
+# Execute official FRR docker start script
+exec /usr/lib/frr/docker-start
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

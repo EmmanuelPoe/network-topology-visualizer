@@ -149,11 +149,14 @@ function renderNetwork(data) {
     if (params.nodes.length > 0) {
       const node = nodesDataset.get(params.nodes[0]);
       showDeviceDetail(node._data, data.links);
+      openTerminalForDevice(node.id);
     } else if (params.edges.length > 0) {
       const edge = edgesDataset.get(params.edges[0]);
       showEdgeDetail(edge._data);
+      closeTerminal();
     } else {
       resetDetailPanel();
+      closeTerminal();
     }
   });
 
@@ -180,17 +183,21 @@ function renderNetwork(data) {
     pastePosition = params.pointer.canvas;
     
     const nodeId = network.getNodeAt(params.pointer.DOM);
+    const consoleBtn = document.getElementById('menu-console');
     if (nodeId) {
       const nodeData = nodesDataset.get(nodeId);
       if (nodeData && nodeData._data) {
         menuSelectedNodeData = nodeData._data;
         copyBtn.classList.remove('disabled');
+        if (consoleBtn) consoleBtn.classList.remove('disabled');
       } else {
         copyBtn.classList.add('disabled');
+        if (consoleBtn) consoleBtn.classList.add('disabled');
       }
     } else {
       menuSelectedNodeData = null;
       copyBtn.classList.add('disabled');
+      if (consoleBtn) consoleBtn.classList.add('disabled');
     }
     
     if (copiedNodeData) {
@@ -459,8 +466,17 @@ function showDeviceDetail(device, links) {
           ${l.src_iface || l.dst_iface ? `<div class="link-iface">${l.src_iface || '—'} ↔ ${l.dst_iface || '—'}</div>` : ''}
         </div>`).join('')}
     </div>
+    <button id="open-console-btn" class="ctrl-btn active" style="margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600;">
+      <span>&#128187;</span> Open Console
+    </button>
   `;
   setDetailVisible(true);
+  const consoleBtn = document.getElementById('open-console-btn');
+  if (consoleBtn) {
+    consoleBtn.addEventListener('click', () => {
+      openTerminalForDevice(device.id);
+    });
+  }
 }
 
 function showEdgeDetail(link) {
@@ -765,6 +781,13 @@ function handleMenuPaste() {
   }
 }
 
+function handleMenuConsole() {
+  hideContextMenu();
+  if (menuSelectedNodeData) {
+    openTerminalForDevice(menuSelectedNodeData.id);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GUI Builder Modals & Syncing
 // ---------------------------------------------------------------------------
@@ -1017,6 +1040,65 @@ function exportJSON() {
 }
 
 // ---------------------------------------------------------------------------
+// Discovery Feature
+// ---------------------------------------------------------------------------
+function openDiscoverModal() {
+  document.getElementById('discover-ip').value = '';
+  document.getElementById('discover-user').value = '';
+  document.getElementById('discover-pass').value = '';
+  document.getElementById('discover-modal').classList.remove('hidden');
+}
+
+function closeDiscoverModal() {
+  document.getElementById('discover-modal').classList.add('hidden');
+}
+
+async function runDiscovery() {
+  const ip = document.getElementById('discover-ip').value.trim();
+  const username = document.getElementById('discover-user').value.trim();
+  const password = document.getElementById('discover-pass').value;
+  const platform = document.getElementById('discover-platform').value;
+  const depth = parseInt(document.getElementById('discover-depth').value, 10);
+  const mock_mode = document.getElementById('discover-mock').checked;
+
+  if (!ip || !username) {
+    showToast('IP Address and Username are required', 'warning');
+    return;
+  }
+
+  closeDiscoverModal();
+  setLoading(true);
+  
+  try {
+    const resp = await fetch('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seed_ip: ip,
+        username: username,
+        password: password,
+        platform: platform,
+        max_depth: depth,
+        mock_mode: mock_mode
+      })
+    });
+    
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast('Discovery error: ' + (err.detail || resp.statusText), 'error');
+      return;
+    }
+    
+    // The new topology will be pushed automatically via WebSocket!
+    showToast('Discovery started successfully...', 'success');
+  } catch (e) {
+    showToast('Network error during discovery', 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 window.addEventListener('load', () => {
@@ -1053,3 +1135,391 @@ document.addEventListener('click', e => {
     document.getElementById('btn-done-adding')?.classList.remove('hidden');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Terminal Console & Path Highlighting Feature
+// ---------------------------------------------------------------------------
+let terminalDeviceId = null;
+let terminalSocket = null;
+let terminalMode = 'mock';
+let terminalHistory = [];
+let terminalHistoryIndex = -1;
+let pathHighlightTimeout = null;
+
+function openTerminalForDevice(deviceId) {
+  if (!currentTopology) return;
+  const device = currentTopology.devices.find(d => d.id === deviceId);
+  if (!device) return;
+
+  terminalDeviceId = deviceId;
+  const selectEl = document.getElementById('terminal-mode-select');
+  terminalMode = selectEl.value;
+
+  document.getElementById('terminal-title').textContent = `Console: ${device.label}`;
+  
+  // Show drawer
+  const drawer = document.getElementById('terminal-drawer');
+  drawer.classList.remove('closed');
+  drawer.classList.remove('minimized');
+  document.getElementById('terminal-min-btn').textContent = '━';
+
+  // Toggle SSH Credentials form if we were left in SSH mode
+  const credsForm = document.getElementById('terminal-ssh-creds');
+  if (terminalMode === 'ssh') {
+    credsForm.classList.remove('hidden');
+  } else {
+    credsForm.classList.add('hidden');
+  }
+
+  clearTerminalOutput();
+  
+  if (terminalMode === 'mock') {
+    connectTerminalSocket();
+  } else {
+    updateTerminalStatus('disconnected', 'offline');
+    appendTerminalText("Choose mode or enter credentials to start session.\r\n");
+  }
+
+  // Focus terminal input
+  setTimeout(() => {
+    document.getElementById('terminal-input').focus();
+  }, 100);
+}
+
+function closeTerminal() {
+  const drawer = document.getElementById('terminal-drawer');
+  drawer.classList.add('closed');
+  drawer.classList.remove('minimized');
+  
+  if (terminalSocket) {
+    terminalSocket.close();
+    terminalSocket = null;
+  }
+  terminalDeviceId = null;
+}
+
+function toggleTerminalMinimize() {
+  const drawer = document.getElementById('terminal-drawer');
+  const minBtn = document.getElementById('terminal-min-btn');
+  
+  if (drawer.classList.contains('minimized')) {
+    drawer.classList.remove('minimized');
+    minBtn.textContent = '━';
+    document.getElementById('terminal-input').focus();
+  } else {
+    drawer.classList.add('minimized');
+    minBtn.textContent = '┠';
+  }
+}
+
+function handleTerminalModeChange(mode) {
+  terminalMode = mode;
+  if (terminalSocket) {
+    terminalSocket.close();
+    terminalSocket = null;
+  }
+  
+  clearTerminalOutput();
+  
+  const credsForm = document.getElementById('terminal-ssh-creds');
+  if (mode === 'ssh') {
+    credsForm.classList.remove('hidden');
+    updateTerminalStatus('disconnected', 'offline');
+    appendTerminalText("SSH Session requested. Please enter credentials above and click Connect.\r\n");
+  } else {
+    credsForm.classList.add('hidden');
+    connectTerminalSocket();
+  }
+  document.getElementById('terminal-input').focus();
+}
+
+function updateTerminalStatus(dotClass, text) {
+  const dot = document.getElementById('terminal-dot');
+  const status = document.getElementById('terminal-status');
+  
+  dot.className = `terminal-dot ${dotClass}`;
+  status.className = `terminal-status ${dotClass}`;
+  status.textContent = text;
+}
+
+function connectTerminalSocket(username = null, password = null) {
+  if (terminalSocket) {
+    terminalSocket.close();
+  }
+  
+  if (!terminalDeviceId || !currentTopology) return;
+  const device = currentTopology.devices.find(d => d.id === terminalDeviceId);
+  if (!device) return;
+
+  updateTerminalStatus('connecting', 'connecting');
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let url = `${proto}//${location.host}/ws/terminal/${terminalDeviceId}?mode=${terminalMode}`;
+  
+  url += `&ip=${encodeURIComponent(device.ip || '')}`;
+  url += `&platform=${encodeURIComponent(device.platform || 'cisco_ios')}`;
+  
+  if (terminalMode === 'ssh' && username && password) {
+    url += `&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+  }
+
+  terminalSocket = new WebSocket(url);
+
+  terminalSocket.onopen = () => {
+    updateTerminalStatus('connected', 'connected');
+    document.getElementById('terminal-input').focus();
+  };
+
+  terminalSocket.onmessage = event => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data && data.type) {
+        if (data.type === 'output') {
+          appendTerminalText(data.text);
+        } else if (data.type === 'path_highlight') {
+          highlightPath(data.source, data.target);
+        } else if (data.type === 'clear') {
+          clearTerminalOutput();
+        }
+        return;
+      }
+    } catch (e) {
+      // Not JSON, handle as raw text
+    }
+    appendTerminalText(event.data);
+  };
+
+  terminalSocket.onclose = () => {
+    updateTerminalStatus('disconnected', 'disconnected');
+    appendTerminalText("\r\n*** Session closed ***\r\n");
+  };
+
+  terminalSocket.onerror = () => {
+    updateTerminalStatus('disconnected', 'error');
+    appendTerminalText("\r\n*** Connection error ***\r\n");
+  };
+}
+
+function connectRealSsh() {
+  const user = document.getElementById('ssh-username').value.trim();
+  const pass = document.getElementById('ssh-password').value;
+  
+  if (!user || !pass) {
+    showToast('Username and password required for SSH', 'warning');
+    return;
+  }
+  
+  const credsForm = document.getElementById('terminal-ssh-creds');
+  credsForm.classList.add('hidden');
+  
+  connectTerminalSocket(user, pass);
+}
+
+function clearTerminalOutput() {
+  const out = document.getElementById('terminal-output');
+  if (out) out.innerHTML = '';
+}
+
+function appendTerminalText(text) {
+  const out = document.getElementById('terminal-output');
+  if (!out) return;
+
+  // Format line endings for standard browser displaying
+  let formatted = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\n/g, '<br>');
+
+  const div = document.createElement('span');
+  div.innerHTML = formatted;
+  out.appendChild(div);
+  
+  // Auto scroll to bottom
+  out.scrollTop = out.scrollHeight;
+}
+
+// Wire up terminal input key actions
+document.getElementById('terminal-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') {
+    const val = this.value;
+    
+    // Add to history if not empty and not identical to last entry
+    if (val.trim() && (terminalHistory.length === 0 || terminalHistory[terminalHistory.length - 1] !== val)) {
+      terminalHistory.push(val);
+    }
+    terminalHistoryIndex = terminalHistory.length;
+    
+    // Send via socket
+    if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+      terminalSocket.send(val);
+    } else {
+      appendTerminalText(`\r\n${val}\r\n[Not connected]\r\n`);
+    }
+    
+    this.value = '';
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (terminalHistory.length > 0 && terminalHistoryIndex > 0) {
+      terminalHistoryIndex--;
+      this.value = terminalHistory[terminalHistoryIndex];
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (terminalHistoryIndex < terminalHistory.length - 1) {
+      terminalHistoryIndex++;
+      this.value = terminalHistory[terminalHistoryIndex];
+    } else {
+      terminalHistoryIndex = terminalHistory.length;
+      this.value = '';
+    }
+  }
+});
+
+// Auto focus input on clicking anywhere inside terminal body
+document.getElementById('terminal-body').addEventListener('click', () => {
+  document.getElementById('terminal-input').focus();
+});
+
+// ---------------------------------------------------------------------------
+// Shortest Path Finder & Visual Highlighting
+// ---------------------------------------------------------------------------
+
+function findShortestPath(startId, endId) {
+  if (!currentTopology) return null;
+  const adj = {};
+  currentTopology.devices.forEach(d => adj[d.id] = []);
+  currentTopology.links.forEach(l => {
+    if (adj[l.source] && adj[l.target]) {
+      adj[l.source].push({ target: l.target });
+      adj[l.target].push({ target: l.source });
+    }
+  });
+
+  const queue = [[startId]];
+  const visited = new Set([startId]);
+
+  while (queue.length > 0) {
+    const path = queue.shift();
+    const node = path[path.length - 1];
+
+    if (node === endId) {
+      return path;
+    }
+
+    const neighbors = adj[node] || [];
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor.target)) {
+        visited.add(neighbor.target);
+        queue.push([...path, neighbor.target]);
+      }
+    }
+  }
+  return null;
+}
+
+function getEdgeIdBetween(nodeA, nodeB) {
+  if (!currentTopology) return -1;
+  return currentTopology.links.findIndex(l => 
+    (l.source === nodeA && l.target === nodeB) || 
+    (l.source === nodeB && l.target === nodeA)
+  );
+}
+
+function resetGraphHighlight() {
+  if (!nodesDataset || !edgesDataset || !currentTopology) return;
+  const { nodes, edges } = buildGraph(currentTopology);
+  const visibleNodeIds = new Set(nodesDataset.getIds());
+  nodesDataset.update(nodes.filter(n => visibleNodeIds.has(n.id)));
+  
+  const visibleEdgeIds = new Set(edgesDataset.getIds());
+  edgesDataset.update(edges.filter(e => visibleEdgeIds.has(e.id)));
+  
+  network.unselectAll();
+}
+
+function highlightPath(sourceId, targetId) {
+  if (!network || !nodesDataset || !edgesDataset) return;
+  
+  if (pathHighlightTimeout) {
+    clearTimeout(pathHighlightTimeout);
+    pathHighlightTimeout = null;
+  }
+  
+  const path = findShortestPath(sourceId, targetId);
+  if (!path || path.length < 2) {
+    showToast('No active connection path found between devices', 'warning');
+    return;
+  }
+  
+  // Dim all other nodes and edges
+  const DIM_NODE = { background: '#161b22', border: '#21262d' };
+  const DIM_FONT = { color: '#3d444d' };
+  
+  const nodeUpdates = nodesDataset.get().map(node => {
+    if (path.includes(node.id)) {
+      const colors = NODE_COLORS[node._data.type] || NODE_COLORS.switch;
+      return {
+        id: node.id,
+        color: { 
+          background: colors.background, 
+          border: '#ff9c3a', 
+          highlight: { background: colors.background, border: '#ff9c3a' } 
+        },
+        borderWidth: 3,
+        shadow: { enabled: true, color: '#ff9c3a', size: 15, x: 0, y: 0 }
+      };
+    }
+    return {
+      id: node.id,
+      color: { background: DIM_NODE.background, border: DIM_NODE.border },
+      font: { ...DIM_FONT },
+      borderWidth: 1,
+      shadow: false
+    };
+  });
+  
+  const pathEdgeIds = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const idx = getEdgeIdBetween(path[i], path[i+1]);
+    if (idx !== -1) {
+      pathEdgeIds.push(idx);
+    }
+  }
+  
+  const edgeUpdates = edgesDataset.get().map(edge => {
+    if (pathEdgeIds.includes(edge.id)) {
+      return {
+        id: edge.id,
+        color: { color: '#ff9c3a', highlight: '#ff9c3a' },
+        width: 5,
+        shadow: { enabled: true, color: '#ff9c3a', size: 10 },
+        smooth: { type: 'curvedCW', roundness: 0.1 },
+        dashing: true
+      };
+    }
+    return {
+      id: edge.id,
+      color: { color: '#161b22', highlight: '#161b22' },
+      width: 1,
+      shadow: false
+    };
+  });
+  
+  nodesDataset.update(nodeUpdates);
+  edgesDataset.update(edgeUpdates);
+  
+  // Pan and zoom to cover the path nodes
+  network.fit({
+    nodes: path,
+    animation: { duration: 600, easingFunction: 'easeInOutQuad' }
+  });
+  
+  showToast('Path highlighted in orange', 'info');
+  
+  // Automatically clear highight after 5 seconds
+  pathHighlightTimeout = setTimeout(() => {
+    resetGraphHighlight();
+  }, 5000);
+}
+

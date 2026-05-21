@@ -33,6 +33,7 @@
           &#128194; Upload JSON/YAML
           <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
         </label>
+        <button class="action-btn" onclick="openDiscoverModal()" title="Discover Network Topology">&#128269; Discover</button>
         <button class="action-btn" onclick="loadSample()">Load Sample</button>
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
@@ -112,6 +113,45 @@
 
     <div id="network-wrapper" style="position: relative; flex: 1; display: flex; flex-direction: column;">
       <div id="network-container" style="flex: 1;"></div>
+      
+      <!-- Terminal Drawer -->
+      <div id="terminal-drawer" class="terminal-drawer closed">
+        <div class="terminal-header">
+          <div class="terminal-header-left">
+            <span class="terminal-dot" id="terminal-dot"></span>
+            <span class="terminal-title" id="terminal-title">Console: None</span>
+          </div>
+          <div class="terminal-header-right">
+            <select id="terminal-mode-select" class="terminal-select" onchange="handleTerminalModeChange(this.value)">
+              <option value="mock">Mock Simulator</option>
+              <option value="ssh">Real SSH</option>
+            </select>
+            <span id="terminal-status" class="terminal-status disconnected">disconnected</span>
+            <button class="terminal-btn" onclick="clearTerminalOutput()" title="Clear Console">&#128465;</button>
+            <button class="terminal-btn" id="terminal-min-btn" onclick="toggleTerminalMinimize()" title="Minimize">&#9644;</button>
+            <button class="terminal-btn" onclick="closeTerminal()" title="Close">&#10005;</button>
+          </div>
+        </div>
+        <div class="terminal-content" id="terminal-content-area">
+          <!-- Credentials prompt for SSH -->
+          <div id="terminal-ssh-creds" class="terminal-creds-form hidden">
+            <span class="terminal-creds-label">SSH credentials required for real connection:</span>
+            <div class="terminal-creds-inputs">
+              <input type="text" id="ssh-username" placeholder="Username" value="admin">
+              <input type="password" id="ssh-password" placeholder="Password">
+              <button class="ctrl-btn active" style="width: auto; margin-bottom: 0; padding: 4px 12px; font-size: 0.75rem;" onclick="connectRealSsh()">Connect</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div id="terminal-output" class="terminal-output"></div>
+            <div class="terminal-input-line">
+              <span class="terminal-prompt" id="terminal-prompt">&gt;</span>
+              <input type="text" id="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type a command...">
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="canvas-loading" class="canvas-loading hidden">
         <div class="spinner"></div>
         <p>Loading topology…</p>
@@ -208,8 +248,49 @@
   <div id="context-menu" class="context-menu hidden">
     <div class="menu-item" id="menu-copy" onclick="handleMenuCopy()">Copy</div>
     <div class="menu-item" id="menu-paste" onclick="handleMenuPaste()">Paste</div>
+    <div class="menu-item" id="menu-console" onclick="handleMenuConsole()">Open Console</div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <!-- Discover Modal -->
+  <div id="discover-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="discover-modal-title">Discover Network</h3>
+      <div class="form-group">
+        <label for="discover-ip">Seed IP Address</label>
+        <input type="text" id="discover-ip" placeholder="e.g. 10.0.0.1">
+      </div>
+      <div class="form-group">
+        <label for="discover-user">Username</label>
+        <input type="text" id="discover-user" placeholder="admin">
+      </div>
+      <div class="form-group">
+        <label for="discover-pass">Password</label>
+        <input type="password" id="discover-pass" placeholder="password">
+      </div>
+      <div class="form-group">
+        <label for="discover-platform">Platform</label>
+        <select id="discover-platform">
+          <option value="cisco_ios">Cisco IOS</option>
+          <option value="cisco_nxos">Cisco NX-OS</option>
+          <option value="arista_eos">Arista EOS</option>
+          <option value="juniper_junos">Juniper Junos</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="discover-depth">Max Depth</label>
+        <input type="number" id="discover-depth" value="2" min="0" max="5">
+      </div>
+      <div class="form-group" style="flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;">
+        <input type="checkbox" id="discover-mock" checked style="width: auto;">
+        <label for="discover-mock" style="margin-bottom: 0;">Use Mock Mode (Simulation)</label>
+      </div>
+      <div class="modal-actions">
+        <button id="discover-cancel" class="ctrl-btn" onclick="closeDiscoverModal()">Cancel</button>
+        <button id="discover-save" class="ctrl-btn active" onclick="runDiscovery()">Start Discovery</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=1.0.2"></script>
 </body>
 </html>

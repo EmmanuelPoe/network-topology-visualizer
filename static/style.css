@@ -537,3 +537,241 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   color: #484f58;
   pointer-events: none;
 }
+
+/* ============================================================
+   Terminal Drawer CSS
+   ============================================================ */
+.terminal-drawer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  height: 250px;
+  background: rgba(9, 13, 22, 0.95);
+  border-top: 1px solid #30363d;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.terminal-drawer.minimized {
+  transform: translateY(212px);
+}
+
+.terminal-drawer.closed {
+  transform: translateY(250px);
+}
+
+.terminal-header {
+  height: 38px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 12px;
+  user-select: none;
+}
+
+.terminal-header-left, .terminal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.terminal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #484f58;
+  display: inline-block;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.terminal-dot.connected {
+  background: #2ea043;
+  box-shadow: 0 0 8px #2ea043;
+}
+
+.terminal-dot.connecting {
+  background: #d29922;
+  box-shadow: 0 0 8px #d29922;
+}
+
+.terminal-dot.disconnected {
+  background: #da3633;
+  box-shadow: 0 0 8px #da3633;
+}
+
+.terminal-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e6edf3;
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.terminal-select {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  outline: none;
+  cursor: pointer;
+  height: 22px;
+}
+
+.terminal-status {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #21262d;
+}
+
+.terminal-status.connected {
+  color: #56d364;
+}
+
+.terminal-status.disconnected {
+  color: #ff7b72;
+}
+
+.terminal-status.connecting {
+  color: #d2a8ff;
+}
+
+.terminal-btn {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 0.8rem;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.terminal-btn:hover {
+  background: #30363d;
+  color: #c9d1d9;
+}
+
+.terminal-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-creds-form {
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.terminal-creds-label {
+  font-size: 0.72rem;
+  color: #8b949e;
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.terminal-creds-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.terminal-creds-inputs input {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: #c9d1d9;
+  font-size: 0.75rem;
+  outline: none;
+  width: 140px;
+}
+
+.terminal-creds-inputs input:focus {
+  border-color: #388bfd;
+}
+
+.terminal-body {
+  flex: 1;
+  padding: 10px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Fira Code', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #c9d1d9;
+}
+
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 6px;
+  padding-right: 5px;
+}
+
+.terminal-output::-webkit-scrollbar {
+  width: 6px;
+}
+.terminal-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-output::-webkit-scrollbar-thumb {
+  background: #21262d;
+  border-radius: 3px;
+}
+.terminal-output::-webkit-scrollbar-thumb:hover {
+  background: #30363d;
+}
+
+.terminal-input-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.terminal-prompt {
+  color: #58a6ff;
+  font-weight: bold;
+  user-select: none;
+}
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e6edf3;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+}
+

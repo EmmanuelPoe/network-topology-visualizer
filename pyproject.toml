@@ -10,7 +10,9 @@ dependencies = [
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "python-multipart>=0.0.9",
-    "networkx>=3.0"
+    "networkx>=3.0",
+    "netmiko>=4.0.0",
+    "ntc-templates>=4.0.0",
 ]
 
 [build-system]
