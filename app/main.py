@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from pathlib import Path
 
-import networkx as nx
 import yaml
 from fastapi import (
     FastAPI,
@@ -104,12 +103,6 @@ class Topology(BaseModel):
     links: list[Link]
 
 
-class LayoutRequest(BaseModel):
-    devices: list[Device]
-    links: list[Link]
-    algorithm: str = "spring"
-
-
 class DiscoverRequest(BaseModel):
     seed_ip: str
     username: str
@@ -164,82 +157,6 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-
-# ---------------------------------------------------------------------------
-# NetworkX layout engine
-# ---------------------------------------------------------------------------
-
-LAYOUT_ALGORITHMS: dict[str, callable] = {
-    "spring": nx.spring_layout,
-    "kamada_kawai": nx.kamada_kawai_layout,
-    "circular": nx.circular_layout,
-    "shell": nx.shell_layout,
-    "spectral": nx.spectral_layout,
-}
-
-# Scale factor: NetworkX positions are in [-1, 1]; map to canvas px
-_CANVAS_HALF = 1100
-
-
-def _build_nx_graph(devices: list, links: list) -> nx.Graph:
-    G = nx.Graph()
-    for d in devices:
-        G.add_node(d["id"])
-    for lnk in links:
-        G.add_edge(lnk["source"], lnk["target"])
-    return G
-
-
-def _compute_layout_sync(devices: list, links: list, algorithm: str) -> dict[str, dict]:
-    """
-    Run NetworkX layout synchronously (called inside a thread pool).
-    Returns {node_id: {x: float, y: float}} scaled to canvas coordinates.
-    """
-    G = _build_nx_graph(devices, links)
-
-    try:
-        if algorithm == "shell":
-            # Group nodes into concentric shells by network layer
-            layer_order = ["internet", "edge", "core", "distribution", "access"]
-            shells: list[list[str]] = []
-            placed: set[str] = set()
-            for layer in layer_order:
-                shell = [d["id"] for d in devices if d.get("layer") == layer]
-                if shell:
-                    shells.append(shell)
-                    placed.update(shell)
-            # Any unmapped devices go in the outermost shell
-            remainder = [d["id"] for d in devices if d["id"] not in placed]
-            if remainder:
-                shells.append(remainder)
-            pos = (
-                nx.shell_layout(G, nlist=shells)
-                if len(shells) >= 2
-                else nx.spring_layout(G, seed=42)
-            )
-        elif algorithm == "spectral":
-            # Spectral fails on disconnected graphs — fall back to spring
-            if not nx.is_connected(G):
-                pos = nx.spring_layout(G, seed=42)
-            else:
-                pos = nx.spectral_layout(G)
-        else:
-            fn = LAYOUT_ALGORITHMS[algorithm]
-            kwargs = {"seed": 42} if algorithm == "spring" else {}
-            pos = fn(G, **kwargs)
-    except Exception:
-        # Ultimate fallback
-        pos = nx.spring_layout(G, seed=42)
-
-    # Normalise to canvas coordinates and flip Y (screen coords)
-    return {
-        node_id: {
-            "x": float(xy[0] * _CANVAS_HALF),
-            "y": float(-xy[1] * _CANVAS_HALF),  # invert Y so top=internet
-        }
-        for node_id, xy in pos.items()
-    }
-
 
 # ---------------------------------------------------------------------------
 # Auth helper
@@ -490,45 +407,6 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save topology: {exc}")
-
-
-# ---------------------------------------------------------------------------
-# #17 — Server-side layout
-# ---------------------------------------------------------------------------
-
-
-@app.post("/api/layout")
-async def compute_layout(request: LayoutRequest) -> JSONResponse:
-    """
-    Compute node positions server-side using NetworkX.
-
-    Body: { devices: [...], links: [...], algorithm: "spring" | "kamada_kawai" |
-            "circular" | "shell" | "spectral" }
-
-    Returns: { positions: { nodeId: {x, y} }, algorithm: str }
-    """
-    if request.algorithm not in LAYOUT_ALGORITHMS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown algorithm '{request.algorithm}'. Valid: {list(LAYOUT_ALGORITHMS)}",
-        )
-
-    devices = [d.model_dump() for d in request.devices]
-    links = [lnk.model_dump() for lnk in request.links]
-
-    try:
-        loop = asyncio.get_running_loop()
-        positions = await loop.run_in_executor(
-            _executor,
-            _compute_layout_sync,
-            devices,
-            links,
-            request.algorithm,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Layout failed: {exc}")
-
-    return JSONResponse({"positions": positions, "algorithm": request.algorithm})
 
 
 # ---------------------------------------------------------------------------

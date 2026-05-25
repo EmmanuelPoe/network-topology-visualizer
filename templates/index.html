@@ -58,16 +58,7 @@
         <p class="control-label">Layout</p>
         <button class="ctrl-btn active" data-layout="hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
         <button class="ctrl-btn" data-layout="free" onclick="setLayout('free')">Free</button>
-        <hr class="ctrl-divider">
-        <p class="control-sublabel">Server Layout (NetworkX)</p>
-        <select id="server-algorithm" class="algorithm-select" title="Choose a server-side layout algorithm">
-          <option value="spring">Spring (Force-directed)</option>
-          <option value="kamada_kawai">Kamada-Kawai</option>
-          <option value="circular">Circular</option>
-          <option value="shell">Shell (by layer)</option>
-          <option value="spectral">Spectral</option>
-        </select>
-        <button class="ctrl-btn" id="btn-apply-layout" onclick="computeServerLayout()" disabled>&#9881; Apply</button>
+
       </div>
 
       <div class="control-section">

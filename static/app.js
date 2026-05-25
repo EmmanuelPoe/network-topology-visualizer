@@ -73,8 +73,8 @@ function buildGraph(data) {
       },
       title: buildNodeTooltip(d),
       _data: d,
-      x: (currentLayout === 'free' || currentLayout === 'server') ? d.x : undefined,
-      y: (currentLayout === 'free' || currentLayout === 'server') ? d.y : undefined,
+      x: currentLayout === 'free' ? d.x : undefined,
+      y: currentLayout === 'free' ? d.y : undefined,
       fixed: !isEditingMode,
     };
   });
@@ -158,9 +158,9 @@ function renderNetwork(data, isInitialLoad = false) {
     if (hasSavedPositions) {
       currentLayout = 'free';
     } else {
-      // If layout is server/free and there are no saved positions, we can keep it as is,
+      // If layout is free and there are no saved positions, we can keep it as is,
       // otherwise fallback to hierarchical for default layouts.
-      if (currentLayout !== 'free' && currentLayout !== 'server') {
+      if (currentLayout !== 'free') {
         currentLayout = 'hierarchical';
       }
     }
@@ -315,8 +315,6 @@ function getOptions() {
         nodeSpacing: 160,
       },
     };
-    base.physics = { enabled: false };
-  } else if (currentLayout === 'server') {
     base.physics = { enabled: false };
   }
   return base;
@@ -554,7 +552,6 @@ function enableExportButtons(enabled) {
   document.getElementById('btn-export-svg').disabled = !enabled;
   document.getElementById('btn-export-json').disabled = !enabled;
   document.getElementById('btn-save-server').disabled = !enabled;
-  document.getElementById('btn-apply-layout').disabled = !enabled;
 }
 
 function forceDownload(filename, content, type) {
@@ -814,57 +811,7 @@ async function uploadTopology(event) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// #17 — Server-side layout (NetworkX)
-// ---------------------------------------------------------------------------
 
-async function computeServerLayout() {
-  if (!currentTopology || !network) return;
-  const algorithm = document.getElementById('server-algorithm').value;
-
-  setLoading(true);
-  try {
-    const resp = await fetch('/api/layout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...currentTopology, algorithm }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json();
-      showToast('Layout error: ' + (err.detail || resp.statusText), 'error');
-      return;
-    }
-    const { positions, algorithm: algo } = await resp.json();
-
-    // Update currentTopology devices with positions
-    currentTopology.devices.forEach(d => {
-      if (positions[d.id]) {
-        d.x = positions[d.id].x;
-        d.y = positions[d.id].y;
-      }
-    });
-
-    // Switch to server layout mode
-    currentLayout = 'server';
-    document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
-      btn.classList.remove('active');
-    });
-
-    // Re-render completely with the new coordinates
-    renderNetwork(currentTopology);
-
-    setTimeout(() => {
-      network.fit({ animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
-    }, 80);
-
-    const label = document.querySelector(`#server-algorithm option[value="${algo}"]`);
-    showToast(`${label ? label.textContent : algo} layout applied`, 'success');
-  } catch (e) {
-    showToast('Network error computing layout', 'error');
-  } finally {
-    setLoading(false);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // #18 — WebSocket live topology feed
@@ -1186,7 +1133,7 @@ function exportJSON() {
   if (!currentTopology) return;
   
   // Update node coordinates of all devices
-  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
+  if (network && currentLayout === 'free') {
     const positions = network.getPositions();
     currentTopology.devices.forEach(d => {
       if (positions[d.id]) {
@@ -1205,7 +1152,7 @@ async function saveToServer() {
   if (!currentTopology) return;
   
   // Update node coordinates of all devices immediately before prompt blocks
-  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
+  if (network && currentLayout === 'free') {
     const positions = network.getPositions();
     currentTopology.devices.forEach(d => {
       if (positions[d.id]) {
