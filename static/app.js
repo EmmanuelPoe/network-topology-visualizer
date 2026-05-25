@@ -73,8 +73,8 @@ function buildGraph(data) {
       },
       title: buildNodeTooltip(d),
       _data: d,
-      x: d.x,
-      y: d.y,
+      x: (currentLayout === 'free' || currentLayout === 'server') ? d.x : undefined,
+      y: (currentLayout === 'free' || currentLayout === 'server') ? d.y : undefined,
       fixed: !isEditingMode,
     };
   });
@@ -329,8 +329,6 @@ function setLayout(layout) {
     btn.classList.toggle('active', btn.dataset.layout === layout);
   });
   if (currentTopology) {
-    // Strip manual coordinates so Vis.js recalculates
-    currentTopology.devices.forEach(d => { delete d.x; delete d.y; });
     renderNetwork(currentTopology);
   }
 }
@@ -1186,7 +1184,7 @@ function exportJSON() {
   if (!currentTopology) return;
   
   // Update node coordinates of all devices
-  if (network) {
+  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
     const positions = network.getPositions();
     currentTopology.devices.forEach(d => {
       if (positions[d.id]) {
@@ -1205,7 +1203,7 @@ async function saveToServer() {
   if (!currentTopology) return;
   
   // Update node coordinates of all devices immediately before prompt blocks
-  if (network) {
+  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
     const positions = network.getPositions();
     currentTopology.devices.forEach(d => {
       if (positions[d.id]) {

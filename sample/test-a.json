@@ -7,8 +7,8 @@
       "layer": "access",
       "ip": "10.0.0.1",
       "platform": "",
-      "x": 109.0,
-      "y": -156.0
+      "x": -85.0,
+      "y": -199.0
     },
     {
       "id": "node-xxof0s",
@@ -17,8 +17,38 @@
       "layer": "access",
       "ip": "10.0.0.2",
       "platform": "",
-      "x": -303.0,
-      "y": -449.0
+      "x": 309.0,
+      "y": -195.0
+    },
+    {
+      "id": "node-0nu3yf",
+      "label": "RouerC",
+      "type": "router",
+      "layer": "access",
+      "ip": "10.0.0.3",
+      "platform": "",
+      "x": 311.0,
+      "y": 36.0
+    },
+    {
+      "id": "node-y8aucp",
+      "label": "RouerD",
+      "type": "router",
+      "layer": "access",
+      "ip": "10.0.0.4",
+      "platform": "",
+      "x": -83.0,
+      "y": 26.0
+    },
+    {
+      "id": "9a7610ba-5457-4207-9607-7d0c317fe06e",
+      "label": "CORE",
+      "type": "router",
+      "layer": "core",
+      "ip": "10.0.0.254",
+      "platform": "",
+      "x": 113.0,
+      "y": -98.0
     }
   ],
   "links": [
@@ -29,6 +59,62 @@
       "bandwidth": "1G",
       "src_iface": "G1/1",
       "dst_iface": "G1/1"
+    },
+    {
+      "source": "node-xxof0s",
+      "target": "node-0nu3yf",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/2",
+      "dst_iface": "G1/1"
+    },
+    {
+      "source": "2e0d50fc-ec96-41c4-b088-ad481d1fa58d",
+      "target": "node-y8aucp",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/2",
+      "dst_iface": "G1/1"
+    },
+    {
+      "source": "node-0nu3yf",
+      "target": "node-y8aucp",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/1",
+      "dst_iface": "G1/1"
+    },
+    {
+      "source": "9a7610ba-5457-4207-9607-7d0c317fe06e",
+      "target": "node-y8aucp",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/1",
+      "dst_iface": "G1/3"
+    },
+    {
+      "source": "9a7610ba-5457-4207-9607-7d0c317fe06e",
+      "target": "node-0nu3yf",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/2",
+      "dst_iface": "G1/3"
+    },
+    {
+      "source": "9a7610ba-5457-4207-9607-7d0c317fe06e",
+      "target": "node-xxof0s",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/3",
+      "dst_iface": "G1/3"
+    },
+    {
+      "source": "9a7610ba-5457-4207-9607-7d0c317fe06e",
+      "target": "2e0d50fc-ec96-41c4-b088-ad481d1fa58d",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/4",
+      "dst_iface": "G1/3"
     }
   ]
 }
