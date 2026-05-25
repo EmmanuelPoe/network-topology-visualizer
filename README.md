@@ -6,17 +6,49 @@ Upload a network inventory (JSON or YAML) or build one from scratch using the In
 
 ## Features
 
-- **Interactive GUI Builder** — Build networks dynamically without writing JSON! Drag and drop nodes, draw connections, and configure device properties (IP, Layer, Type) through sleek popup modals.
+- **Interactive GUI Builder** — Build network diagrams dynamically without writing JSON! Drag and drop nodes, draw connections, and configure device node properties (IP, Layer, Type) through sleek popup modals.
 - **Custom Device Icons** — Premium, dark-mode native SVG icons for Routers, Switches, Firewalls, Wireless APs, and Cloud environments.
 - **Server-Side Layouts** — Leverage Python's `networkx` backend to arrange topologies using advanced algorithms (Spring, Kamada-Kawai, Circular, Shell, Spectral).
+- **Server-Side State Persistence** — Save your visual coordinates, new nodes, and custom links directly to the server with the **Save to Server** feature to keep layout configurations on page refreshes.
 - **Interactive Canvas** — Drag nodes, zoom, pan; click a device or link to see its configuration details in the side panel.
 - **Export Capabilities** — Save your visual diagram as **PNG** or **SVG**, or export your custom-drawn network back to a **JSON** file to use in automation workflows.
 - **Live Search & Layer Filtering** — Quickly find specific devices by IP/Name, and toggle between Core, Distribution, Access, and Edge views.
+- **Dual-Mode Console Shell** — Switch between a stateful Mock router CLI shell or a real Netmiko SSH proxy console connection (with active PTY resize, command history, and canvas path tracing).
+
+## System Architecture
+
+The following diagram illustrates how the frontend visualizer, WebSocket server, and SSH network discovery components interact:
+
+```mermaid
+graph TD
+    subgraph Frontend [Client-Side JS & HTML]
+        UI[Interactive UI / Controls]
+        Vis[Vis.js Canvas Editor]
+        WS[WebSocket Manager]
+    end
+
+    subgraph Backend [FastAPI Server]
+        Main[app.main - Routing & State]
+        NX[NetworkX - Layout Engines]
+        Engine[app.discovery - BFS Engine]
+        SSH[SSH Proxy / Paramiko]
+    end
+
+    UI -->|JSON/YAML Upload| Main
+    Vis -->|API Layout Request| NX
+    UI -->|Seed IP & Credentials| Engine
+    Engine -->|SSH/TextFSM| Router[Simulated Router / Network]
+    WS <-->|Interactive Shell / Output| SSH
+    SSH <-->|PTY Channel| Router
+    UI -->|Save Coordinates & Data| Main
+```
 
 ## Tech Stack
 
-- Python 3.10+ / FastAPI — backend API & NetworkX layout algorithms
-- [Vis.js Network](https://visjs.github.io/vis-network/) — interactive graph rendering and GUI builder module
+- Python 3.10+ / FastAPI — backend API, WebSocket proxy, & server-side layout calculations
+- NetworkX, NumPy & SciPy — server-side graph layout mathematical positioning
+- Vis.js Network — interactive graph rendering and GUI builder module
+- Netmiko & Paramiko — SSH console sessions and queue-based neighbor discovery
 - HTML/CSS/JavaScript — vanilla frontend featuring a premium dark mode aesthetic
 
 ## Inventory Format

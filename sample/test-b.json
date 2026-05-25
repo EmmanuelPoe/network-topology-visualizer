@@ -1,0 +1,34 @@
+{
+  "devices": [
+    {
+      "id": "2e0d50fc-ec96-41c4-b088-ad481d1fa58d",
+      "label": "RouerA",
+      "type": "router",
+      "layer": "access",
+      "ip": "10.0.0.1",
+      "platform": "",
+      "x": 528.0,
+      "y": -363.0
+    },
+    {
+      "id": "node-1o5iq1",
+      "label": "RouerB",
+      "type": "router",
+      "layer": "access",
+      "ip": "10.0.0.2",
+      "platform": "",
+      "x": -31.0,
+      "y": 79.0
+    }
+  ],
+  "links": [
+    {
+      "source": "2e0d50fc-ec96-41c4-b088-ad481d1fa58d",
+      "target": "node-1o5iq1",
+      "protocol": "EIGRP",
+      "bandwidth": "1G",
+      "src_iface": "G1/1",
+      "dst_iface": "G1/1"
+    }
+  ]
+}

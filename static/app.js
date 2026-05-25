@@ -9,6 +9,8 @@ let currentLayout = 'hierarchical';
 let currentLayer = 'all';
 let nodesDataset = null;
 let edgesDataset = null;
+let isEditingMode = false;
+let hasDraggedNode = false;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -37,6 +39,10 @@ const LAYER_LEVEL = {
   access: 5,
 };
 
+function hasCustomCoordinates() {
+  return currentTopology && currentTopology.devices && currentTopology.devices.some(d => typeof d.x === 'number' && typeof d.y === 'number');
+}
+
 // ---------------------------------------------------------------------------
 // Graph building
 // ---------------------------------------------------------------------------
@@ -57,11 +63,19 @@ function buildGraph(data) {
       shape: 'image',
       image: icon,
       size: 24,
-      shadow: true,
+      borderWidth: 1,
+      shadow: {
+        enabled: true,
+        color: 'rgba(0,0,0,0.5)',
+        size: 10,
+        x: 5,
+        y: 5
+      },
       title: buildNodeTooltip(d),
       _data: d,
       x: d.x,
       y: d.y,
+      fixed: !isEditingMode,
     };
   });
 
@@ -74,6 +88,8 @@ function buildGraph(data) {
     color: { color: '#30363d', highlight: '#58a6ff' },
     width: calcEdgeWidth(l.bandwidth),
     smooth: { type: 'curvedCW', roundness: 0.1 },
+    dashing: false,
+    shadow: false,
     title: buildEdgeTooltip(l),
     _data: l,
   }));
@@ -119,6 +135,7 @@ function buildEdgeTooltip(l) {
 // Rendering
 // ---------------------------------------------------------------------------
 function renderNetwork(data) {
+  closeTerminal(false);
   currentTopology = data;
   currentLayer = 'all';
 
@@ -135,6 +152,23 @@ function renderNetwork(data) {
     btn.classList.toggle('active', btn.dataset.layer === 'all');
   });
 
+  // Automatically switch layout mode to 'free' if saved positions are present in the layout file
+  const hasSavedPositions = data.devices && data.devices.some(d => typeof d.x === 'number' && typeof d.y === 'number');
+  if (hasSavedPositions) {
+    currentLayout = 'free';
+  } else {
+    // If layout is server/free and there are no saved positions, we can keep it as is,
+    // otherwise fallback to hierarchical for default layouts.
+    if (currentLayout !== 'free' && currentLayout !== 'server') {
+      currentLayout = 'hierarchical';
+    }
+  }
+
+  // Update layout control active states
+  document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.layout === currentLayout);
+  });
+
   const { nodes, edges } = buildGraph(data);
 
   nodesDataset = new vis.DataSet(nodes);
@@ -149,18 +183,16 @@ function renderNetwork(data) {
     if (params.nodes.length > 0) {
       const node = nodesDataset.get(params.nodes[0]);
       showDeviceDetail(node._data, data.links);
-      openTerminalForDevice(node.id);
     } else if (params.edges.length > 0) {
       const edge = edgesDataset.get(params.edges[0]);
       showEdgeDetail(edge._data);
-      closeTerminal();
     } else {
       resetDetailPanel();
-      closeTerminal();
     }
   });
 
   network.on('doubleClick', params => {
+    if (!isEditingMode) return;
     if (params.nodes.length > 0) {
       const nodeData = nodesDataset.get(params.nodes[0]);
       showNodeEditor('edit', nodeData, null);
@@ -183,27 +215,29 @@ function renderNetwork(data) {
     pastePosition = params.pointer.canvas;
     
     const nodeId = network.getNodeAt(params.pointer.DOM);
-    const consoleBtn = document.getElementById('menu-console');
     if (nodeId) {
       const nodeData = nodesDataset.get(nodeId);
       if (nodeData && nodeData._data) {
         menuSelectedNodeData = nodeData._data;
         copyBtn.classList.remove('disabled');
-        if (consoleBtn) consoleBtn.classList.remove('disabled');
       } else {
         copyBtn.classList.add('disabled');
-        if (consoleBtn) consoleBtn.classList.add('disabled');
       }
     } else {
       menuSelectedNodeData = null;
       copyBtn.classList.add('disabled');
-      if (consoleBtn) consoleBtn.classList.add('disabled');
     }
     
     if (copiedNodeData) {
       pasteBtn.classList.remove('disabled');
     } else {
       pasteBtn.classList.add('disabled');
+    }
+  });
+
+  network.on('dragEnd', params => {
+    if (isEditingMode) {
+      hasDraggedNode = true;
     }
   });
 
@@ -214,7 +248,7 @@ function renderNetwork(data) {
 function getOptions() {
   const base = {
     physics: {
-      enabled: currentLayout === 'free',
+      enabled: currentLayout === 'free' && !isEditingMode && !hasCustomCoordinates(),
       stabilization: { iterations: 150 },
     },
     layout: {
@@ -225,9 +259,11 @@ function getOptions() {
       tooltipDelay: 150,
       navigationButtons: true,
       keyboard: true,
+      dragNodes: isEditingMode,
+      selectConnectedEdges: false,
     },
     manipulation: {
-      enabled: true,
+      enabled: isEditingMode,
       addNode: function (data, callback) {
         showNodeEditor('add', data, callback);
       },
@@ -270,7 +306,7 @@ function getOptions() {
   if (currentLayout === 'hierarchical') {
     base.layout = {
       hierarchical: {
-        enabled: true,
+        enabled: !isEditingMode,
         direction: 'UD',
         sortMethod: 'directed',
         levelSeparation: 110,
@@ -517,6 +553,7 @@ function enableExportButtons(enabled) {
   document.getElementById('btn-export-png').disabled = !enabled;
   document.getElementById('btn-export-svg').disabled = !enabled;
   document.getElementById('btn-export-json').disabled = !enabled;
+  document.getElementById('btn-save-server').disabled = !enabled;
   document.getElementById('btn-apply-layout').disabled = !enabled;
 }
 
@@ -596,32 +633,154 @@ function setLoading(loading) {
 function clearLayout() {
   renderNetwork({ devices: [], links: [] });
   showToast('Started new empty topology', 'success');
+  
+  const select = document.getElementById('select-server-layout');
+  if (select) select.value = '';
+  const deleteBtn = document.getElementById('btn-delete-layout');
+  if (deleteBtn) deleteBtn.disabled = true;
+  const renameBtn = document.getElementById('btn-rename-layout');
+  if (renameBtn) renameBtn.disabled = true;
 }
 
 function stopAdding() {
-  if (network) {
-    network.disableEditMode();
-    network.enableEditMode();
-    document.getElementById('btn-done-adding')?.classList.add('hidden');
-    showToast('Exited add mode');
+  if (isEditingMode) {
+    toggleEditMode();
   }
 }
 
-async function loadSample() {
+function toggleEditMode() {
+  isEditingMode = !isEditingMode;
+  const btn = document.getElementById('btn-edit-toggle');
+  if (btn) {
+    if (isEditingMode) {
+      btn.innerHTML = '&#10004; Done Editing';
+      btn.title = 'Finish editing network diagram';
+      btn.classList.add('active-editing');
+      showToast('Entered edit mode. Rearrange devices or add/link new ones.', 'info');
+    } else {
+      btn.innerHTML = '&#9998; Edit Layout';
+      btn.title = 'Toggle editing network diagram';
+      btn.classList.remove('active-editing');
+      showToast('Exited edit mode. Viewing mode active.', 'info');
+    }
+  }
+  
+  if (!isEditingMode) {
+    // Exiting edit mode
+    if (hasDraggedNode && currentLayout === 'hierarchical') {
+      currentLayout = 'free';
+      document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.layout === 'free');
+      });
+      showToast('Switched to Free layout to preserve your custom positions.', 'info');
+    }
+    hasDraggedNode = false;
+    
+    // Automatically save layout to server
+    saveToServer();
+  }
+
+  if (network) {
+    const isHierarchical = currentLayout === 'hierarchical';
+    network.setOptions({
+      manipulation: { enabled: isEditingMode },
+      interaction: { dragNodes: isEditingMode },
+      layout: {
+        hierarchical: {
+          enabled: isHierarchical ? !isEditingMode : false
+        }
+      },
+      physics: {
+        enabled: currentLayout === 'free' && !isEditingMode && !hasCustomCoordinates()
+      }
+    });
+    if (!isEditingMode) {
+      network.disableEditMode();
+    }
+  }
+
+  // Update nodes dataset fixed state
+  if (nodesDataset) {
+    const allNodes = nodesDataset.get();
+    const updates = allNodes.map(n => ({
+      id: n.id,
+      fixed: !isEditingMode
+    }));
+    nodesDataset.update(updates);
+  }
+}
+
+async function refreshServerLayouts() {
+  try {
+    const resp = await fetch('/api/layouts');
+    if (!resp.ok) return;
+    const { layouts } = await resp.json();
+    const select = document.getElementById('select-server-layout');
+    if (!select) return;
+    
+    // Clear existing options except the first one
+    select.innerHTML = '<option value="">-- Load Layout --</option>';
+    
+    layouts.forEach(filename => {
+      const option = document.createElement('option');
+      option.value = filename;
+      // Make a clean display name: e.g. campus_network.json -> Campus Network
+      let displayName = filename.replace(/\.(json|yaml|yml)$/i, '').replace(/_/g, ' ');
+      displayName = displayName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      option.textContent = displayName;
+      select.appendChild(option);
+    });
+  } catch (e) {
+    console.error('Failed to fetch server-side layouts:', e);
+  }
+}
+
+async function loadServerLayout(filename) {
+  if (!filename) {
+    const deleteBtn = document.getElementById('btn-delete-layout');
+    if (deleteBtn) deleteBtn.disabled = true;
+    const renameBtn = document.getElementById('btn-rename-layout');
+    if (renameBtn) renameBtn.disabled = true;
+    return;
+  }
   setLoading(true);
   try {
-    const resp = await fetch('/api/sample');
+    const resp = await fetch(`/api/layouts/${encodeURIComponent(filename)}`);
     if (!resp.ok) {
       const err = await resp.json();
-      showToast('Failed to load sample: ' + (err.detail || resp.statusText), 'error');
+      showToast('Failed to load layout: ' + (err.detail || resp.statusText), 'error');
+      if (filename === 'topology.json') {
+        renderNetwork({ devices: [], links: [] });
+      }
+      const deleteBtn = document.getElementById('btn-delete-layout');
+      if (deleteBtn) deleteBtn.disabled = true;
+      const renameBtn = document.getElementById('btn-rename-layout');
+      if (renameBtn) renameBtn.disabled = true;
       return;
     }
-    renderNetwork(await resp.json());
-    showToast('Sample topology loaded', 'success');
+    const data = await resp.json();
+    renderNetwork(data);
+    showToast(`Layout loaded successfully`, 'success');
+    
+    const isCustom = filename !== 'topology.json';
+    const deleteBtn = document.getElementById('btn-delete-layout');
+    if (deleteBtn) deleteBtn.disabled = !isCustom;
+    const renameBtn = document.getElementById('btn-rename-layout');
+    if (renameBtn) renameBtn.disabled = !isCustom;
   } catch (e) {
-    showToast('Network error loading sample', 'error');
+    showToast('Network error loading layout', 'error');
+    if (filename === 'topology.json') {
+      renderNetwork({ devices: [], links: [] });
+    }
+    const deleteBtn = document.getElementById('btn-delete-layout');
+    if (deleteBtn) deleteBtn.disabled = true;
+    const renameBtn = document.getElementById('btn-rename-layout');
+    if (renameBtn) renameBtn.disabled = true;
   } finally {
     setLoading(false);
+    // Keep selection in dropdown
+    const select = document.getElementById('select-server-layout');
+    if (select) select.value = filename;
   }
 }
 
@@ -646,6 +805,12 @@ async function uploadTopology(event) {
     setLoading(false);
     // Reset input so same file can be re-uploaded
     event.target.value = '';
+    const select = document.getElementById('select-server-layout');
+    if (select) select.value = '';
+    const deleteBtn = document.getElementById('btn-delete-layout');
+    if (deleteBtn) deleteBtn.disabled = true;
+    const renameBtn = document.getElementById('btn-rename-layout');
+    if (renameBtn) renameBtn.disabled = true;
   }
 }
 
@@ -714,34 +879,40 @@ function initWebSocket() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${proto}//${location.host}/ws/topology`;
 
-  _ws = new WebSocket(url);
+  try {
+    _ws = new WebSocket(url);
 
-  _ws.onopen = () => {
-    _wsDelay = 1000; // reset back-off on successful connect
-    setLiveIndicator(true);
-  };
+    _ws.onopen = () => {
+      _wsDelay = 1000; // reset back-off on successful connect
+      setLiveIndicator(true);
+    };
 
-  _ws.onmessage = event => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data && data.devices && data.links) {
-        renderNetwork(data);
-        showToast('Topology updated via live feed', 'info');
+    _ws.onmessage = event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data && data.devices && data.links) {
+          renderNetwork(data);
+          showToast('Topology updated via live feed', 'info');
+        }
+      } catch (e) {
+        console.error('[WS] message parse error', e);
       }
-    } catch (e) {
-      console.error('[WS] message parse error', e);
-    }
-  };
+    };
 
-  _ws.onclose = () => {
+    _ws.onclose = () => {
+      setLiveIndicator(false);
+      _wsDelay = Math.min(_wsDelay * 2, 30_000);
+      _wsReconnectTimer = setTimeout(initWebSocket, _wsDelay);
+    };
+
+    _ws.onerror = () => {
+      _ws.close(); // triggers onclose → reconnect
+    };
+  } catch (err) {
+    console.error('WebSocket connection failed to initialize:', err);
     setLiveIndicator(false);
-    _wsDelay = Math.min(_wsDelay * 2, 30_000);
     _wsReconnectTimer = setTimeout(initWebSocket, _wsDelay);
-  };
-
-  _ws.onerror = () => {
-    _ws.close(); // triggers onclose → reconnect
-  };
+  }
 }
 
 function setLiveIndicator(connected) {
@@ -778,13 +949,6 @@ function handleMenuPaste() {
     };
     pendingPastePosition = pastePosition;
     showNodeEditor('add', copyData, null);
-  }
-}
-
-function handleMenuConsole() {
-  hideContextMenu();
-  if (menuSelectedNodeData) {
-    openTerminalForDevice(menuSelectedNodeData.id);
   }
 }
 
@@ -895,7 +1059,6 @@ document.getElementById('node-save')?.addEventListener('click', () => {
   if (pendingNodeAction === 'add' && network) {
     setTimeout(() => { 
       network.addNodeMode(); 
-      document.getElementById('btn-done-adding')?.classList.remove('hidden');
     }, 50);
   }
 });
@@ -980,7 +1143,6 @@ function showEdgeEditor(action, data, callback) {
     if (!isEdit && network) {
       setTimeout(() => { 
         network.addEdgeMode(); 
-        document.getElementById('btn-done-adding')?.classList.remove('hidden');
       }, 50);
     }
   };
@@ -1023,8 +1185,8 @@ function syncTopologyFromGraph() {
 function exportJSON() {
   if (!currentTopology) return;
   
-  // Update node coordinates if layout is free or server
-  if (network && (currentLayout === 'free' || currentLayout === 'server')) {
+  // Update node coordinates of all devices
+  if (network) {
     const positions = network.getPositions();
     currentTopology.devices.forEach(d => {
       if (positions[d.id]) {
@@ -1037,6 +1199,145 @@ function exportJSON() {
   const jsonString = JSON.stringify(currentTopology, null, 2);
   forceDownload('network-topology.json', jsonString, 'application/json');
   showToast('JSON exported successfully', 'success');
+}
+
+async function saveToServer() {
+  if (!currentTopology) return;
+  
+  // Update node coordinates of all devices immediately before prompt blocks
+  if (network) {
+    const positions = network.getPositions();
+    currentTopology.devices.forEach(d => {
+      if (positions[d.id]) {
+        d.x = positions[d.id].x;
+        d.y = positions[d.id].y;
+      }
+    });
+  }
+
+  const select = document.getElementById('select-server-layout');
+  let defaultName = 'topology';
+  if (select && select.value) {
+    defaultName = select.value.replace(/\.(json|yaml|yml)$/i, '');
+  }
+  
+  const name = prompt("Enter a name for the layout:", defaultName);
+  if (name === null) return; // user cancelled
+  const cleanName = name.trim();
+  if (!cleanName) {
+    showToast('Layout name cannot be empty', 'warning');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const resp = await fetch(`/api/save?name=${encodeURIComponent(cleanName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentTopology),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast('Save failed: ' + (err.detail || resp.statusText), 'error');
+      return;
+    }
+    const result = await resp.json();
+    showToast('Topology saved to server successfully', 'success');
+    await refreshServerLayouts();
+    // Select the saved layout in dropdown
+    const select = document.getElementById('select-server-layout');
+    if (select && result.filename) {
+      select.value = result.filename;
+      const deleteBtn = document.getElementById('btn-delete-layout');
+      if (deleteBtn) {
+        deleteBtn.disabled = result.filename === 'topology.json';
+      }
+      const renameBtn = document.getElementById('btn-rename-layout');
+      if (renameBtn) {
+        renameBtn.disabled = result.filename === 'topology.json';
+      }
+    }
+  } catch (e) {
+    showToast('Network error saving topology', 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function deleteCurrentLayout() {
+  const select = document.getElementById('select-server-layout');
+  if (!select) return;
+  const filename = select.value;
+  if (!filename || filename === 'topology.json') return;
+
+  const cleanName = filename.replace(/\.(json|yaml|yml)$/i, '').replace(/_/g, ' ');
+  const displayName = cleanName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  if (!confirm(`Are you sure you want to permanently delete the layout "${displayName}"?`)) {
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const resp = await fetch(`/api/layouts/${encodeURIComponent(filename)}`, {
+      method: 'DELETE'
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast('Delete failed: ' + (err.detail || resp.statusText), 'error');
+      return;
+    }
+    showToast(`Layout "${displayName}" deleted successfully`, 'success');
+    await refreshServerLayouts();
+    // Revert to default layout
+    await loadServerLayout('topology.json');
+  } catch (e) {
+    showToast('Network error deleting layout', 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function renameCurrentLayout() {
+  const select = document.getElementById('select-server-layout');
+  if (!select) return;
+  const filename = select.value;
+  if (!filename || filename === 'topology.json') return;
+
+  const currentDisplayName = filename.replace(/\.(json|yaml|yml)$/i, '').replace(/_/g, ' ');
+  const displayName = currentDisplayName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  const newName = prompt(`Enter a new name for the layout "${displayName}":`, displayName);
+  if (newName === null) return; // cancelled
+  const cleanNewName = newName.trim();
+  if (!cleanNewName) {
+    showToast('Layout name cannot be empty', 'warning');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const resp = await fetch(`/api/layouts/${encodeURIComponent(filename)}?new_name=${encodeURIComponent(cleanNewName)}`, {
+      method: 'PATCH'
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast('Rename failed: ' + (err.detail || resp.statusText), 'error');
+      return;
+    }
+    const result = await resp.json();
+    showToast(`Layout renamed successfully`, 'success');
+    await refreshServerLayouts();
+    
+    // Load the renamed layout
+    if (result.filename) {
+      await loadServerLayout(result.filename);
+    }
+  } catch (e) {
+    showToast('Network error renaming layout', 'error');
+  } finally {
+    setLoading(false);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,8 +1403,33 @@ async function runDiscovery() {
 // Init
 // ---------------------------------------------------------------------------
 window.addEventListener('load', () => {
-  loadSample();
+  refreshServerLayouts().then(() => {
+    loadServerLayout('topology.json');
+  });
   initWebSocket();
+
+  // Prevent canvas panning when clicking and dragging starting on a node in viewing mode
+  const container = document.getElementById('network-container');
+  if (container) {
+    container.addEventListener('mousedown', event => {
+      if (!network || isEditingMode) return;
+      const rect = container.getBoundingClientRect();
+      const domPosition = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+      const nodeId = network.getNodeAt(domPosition);
+      if (nodeId !== undefined) {
+        network.setOptions({ interaction: { dragView: false } });
+      }
+    });
+  }
+
+  window.addEventListener('mouseup', () => {
+    if (network && !isEditingMode) {
+      network.setOptions({ interaction: { dragView: true } });
+    }
+  });
 });
 
 // Keyboard shortcuts
@@ -1126,15 +1452,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Catch vis.js manipulation toolbar clicks to show/hide the Done button
-document.addEventListener('click', e => {
-  if (!e.target || !e.target.classList) return;
-  if (e.target.classList.contains('vis-back')) {
-    document.getElementById('btn-done-adding')?.classList.add('hidden');
-  } else if (e.target.classList.contains('vis-add') || e.target.classList.contains('vis-addEdge')) {
-    document.getElementById('btn-done-adding')?.classList.remove('hidden');
-  }
-});
+// Click handler for vis.js manipulation is handled by persistent toggle Edit Layout button.
 
 // ---------------------------------------------------------------------------
 // Terminal Console & Path Highlighting Feature
@@ -1145,6 +1463,60 @@ let terminalMode = 'mock';
 let terminalHistory = [];
 let terminalHistoryIndex = -1;
 let pathHighlightTimeout = null;
+
+function adjustViewportForTerminal(animate = true) {
+  if (!network) return;
+
+  const drawer = document.getElementById('terminal-drawer');
+  if (!drawer) return;
+
+  let D = 0;
+  if (!drawer.classList.contains('closed')) {
+    if (drawer.classList.contains('minimized')) {
+      D = 38; // visible height when minimized
+    } else {
+      D = 250; // visible height when open
+    }
+  }
+
+  const container = document.getElementById('network-container');
+  if (!container) return;
+  const H = container.clientHeight;
+  if (!H || H <= D) return;
+
+  // Save current view
+  const originalScale = network.getScale();
+  const originalCenter = network.getViewPosition();
+
+  // Temporarily fit the network synchronously to calculate baseline fit scale & center
+  network.fit({ animation: false });
+  const baselineScale = network.getScale();
+  const baselineCenter = network.getViewPosition();
+
+  // Restore the original view immediately (synchronously so it doesn't render)
+  network.moveTo({
+    position: originalCenter,
+    scale: originalScale,
+    animation: false
+  });
+
+  // Calculate target scale and shift to fit within visible height (H - D)
+  const heightFactor = (H - D) / H;
+  const targetScale = baselineScale * heightFactor;
+  if (targetScale <= 0) return;
+
+  const targetCenter = {
+    x: baselineCenter.x,
+    y: baselineCenter.y + (D / 2) / targetScale
+  };
+
+  // Perform smooth transition to the target state
+  network.moveTo({
+    position: targetCenter,
+    scale: targetScale,
+    animation: animate ? { duration: 300, easingFunction: 'easeInOutQuad' } : false
+  });
+}
 
 function openTerminalForDevice(deviceId) {
   if (!currentTopology) return;
@@ -1162,6 +1534,15 @@ function openTerminalForDevice(deviceId) {
   drawer.classList.remove('closed');
   drawer.classList.remove('minimized');
   document.getElementById('terminal-min-btn').textContent = '━';
+
+  // Load history from localStorage
+  try {
+    const hist = localStorage.getItem('netvis_terminal_history_' + deviceId);
+    terminalHistory = hist ? JSON.parse(hist) : [];
+  } catch (e) {
+    terminalHistory = [];
+  }
+  terminalHistoryIndex = terminalHistory.length;
 
   // Toggle SSH Credentials form if we were left in SSH mode
   const credsForm = document.getElementById('terminal-ssh-creds');
@@ -1184,10 +1565,14 @@ function openTerminalForDevice(deviceId) {
   setTimeout(() => {
     document.getElementById('terminal-input').focus();
   }, 100);
+
+  // Keep all devices within visible view above terminal drawer
+  adjustViewportForTerminal(true);
 }
 
-function closeTerminal() {
+function closeTerminal(adjustViewport = true) {
   const drawer = document.getElementById('terminal-drawer');
+  if (!drawer) return;
   drawer.classList.add('closed');
   drawer.classList.remove('minimized');
   
@@ -1196,6 +1581,18 @@ function closeTerminal() {
     terminalSocket = null;
   }
   terminalDeviceId = null;
+
+  // Clear path highlight immediately if console is closed
+  if (pathHighlightTimeout) {
+    clearTimeout(pathHighlightTimeout);
+    pathHighlightTimeout = null;
+  }
+  resetGraphHighlight();
+
+  // Reset viewport to center nodes in full screen
+  if (adjustViewport) {
+    adjustViewportForTerminal(true);
+  }
 }
 
 function toggleTerminalMinimize() {
@@ -1206,10 +1603,14 @@ function toggleTerminalMinimize() {
     drawer.classList.remove('minimized');
     minBtn.textContent = '━';
     document.getElementById('terminal-input').focus();
+    setTimeout(sendTerminalResize, 320); // Wait for transition animation
   } else {
     drawer.classList.add('minimized');
     minBtn.textContent = '┠';
   }
+
+  // Adjust viewport based on minimized/expanded terminal state
+  adjustViewportForTerminal(true);
 }
 
 function handleTerminalModeChange(mode) {
@@ -1240,6 +1641,17 @@ function updateTerminalStatus(dotClass, text) {
   dot.className = `terminal-dot ${dotClass}`;
   status.className = `terminal-status ${dotClass}`;
   status.textContent = text;
+
+  // Dynamically update placeholder and prompt text based on connection state
+  if (dotClass === 'disconnected') {
+    const promptEl = document.getElementById('terminal-prompt');
+    if (promptEl) promptEl.textContent = '>';
+    const inputEl = document.getElementById('terminal-input');
+    if (inputEl) inputEl.placeholder = 'Type a command...';
+  } else {
+    const inputEl = document.getElementById('terminal-input');
+    if (inputEl) inputEl.placeholder = '';
+  }
 }
 
 function connectTerminalSocket(username = null, password = null) {
@@ -1268,6 +1680,7 @@ function connectTerminalSocket(username = null, password = null) {
   terminalSocket.onopen = () => {
     updateTerminalStatus('connected', 'connected');
     document.getElementById('terminal-input').focus();
+    sendTerminalResize();
   };
 
   terminalSocket.onmessage = event => {
@@ -1277,7 +1690,7 @@ function connectTerminalSocket(username = null, password = null) {
         if (data.type === 'output') {
           appendTerminalText(data.text);
         } else if (data.type === 'path_highlight') {
-          highlightPath(data.source, data.target);
+          highlightPath(data.source, data.target, data.highlight_type || 'trace');
         } else if (data.type === 'clear') {
           clearTerminalOutput();
         }
@@ -1324,6 +1737,23 @@ function appendTerminalText(text) {
   const out = document.getElementById('terminal-output');
   if (!out) return;
 
+  // Extract prompt dynamic updates (e.g. hostname> or hostname# or config mode or Username/Password)
+  const promptRegex = /([A-Za-z0-9._-]+(?:\([^)]+\))?[>#])\s*$/;
+  const loginRegex = /(Username:|Password:)\s*$/i;
+  
+  let match = text.match(promptRegex) || text.match(loginRegex);
+  if (match) {
+    const promptStr = match[1];
+    const promptEl = document.getElementById('terminal-prompt');
+    if (promptEl) {
+      promptEl.textContent = promptStr;
+    }
+    const matchIndex = text.lastIndexOf(match[0]);
+    if (matchIndex !== -1) {
+      text = text.substring(0, matchIndex);
+    }
+  }
+
   // Format line endings for standard browser displaying
   let formatted = text
     .replace(/\r\n/g, '\n')
@@ -1347,11 +1777,19 @@ document.getElementById('terminal-input').addEventListener('keydown', function (
     // Add to history if not empty and not identical to last entry
     if (val.trim() && (terminalHistory.length === 0 || terminalHistory[terminalHistory.length - 1] !== val)) {
       terminalHistory.push(val);
+      if (terminalDeviceId) {
+        localStorage.setItem('netvis_terminal_history_' + terminalDeviceId, JSON.stringify(terminalHistory));
+      }
     }
     terminalHistoryIndex = terminalHistory.length;
     
     // Send via socket
     if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
+      if (terminalMode === 'mock') {
+        const promptEl = document.getElementById('terminal-prompt');
+        const activePrompt = promptEl ? promptEl.textContent : '>';
+        appendTerminalText(`${activePrompt} ${val}\r\n`);
+      }
       terminalSocket.send(val);
     } else {
       appendTerminalText(`\r\n${val}\r\n[Not connected]\r\n`);
@@ -1375,6 +1813,27 @@ document.getElementById('terminal-input').addEventListener('keydown', function (
     }
   }
 });
+
+function sendTerminalResize() {
+  if (!terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) return;
+  const out = document.getElementById('terminal-output');
+  if (!out) return;
+  
+  const width = out.clientWidth;
+  const height = out.clientHeight;
+  
+  // Approximate character dimensions: ~8.2px width and ~17px height per character
+  const cols = Math.floor(width / 8.2);
+  const rows = Math.floor(height / 17);
+  
+  terminalSocket.send(JSON.stringify({
+    type: 'resize',
+    cols: Math.max(40, cols),
+    rows: Math.max(5, rows)
+  }));
+}
+
+window.addEventListener('resize', sendTerminalResize);
 
 // Auto focus input on clicking anywhere inside terminal body
 document.getElementById('terminal-body').addEventListener('click', () => {
@@ -1438,7 +1897,7 @@ function resetGraphHighlight() {
   network.unselectAll();
 }
 
-function highlightPath(sourceId, targetId) {
+function highlightPath(sourceId, targetId, highlightType = 'trace') {
   if (!network || !nodesDataset || !edgesDataset) return;
   
   if (pathHighlightTimeout) {
@@ -1446,6 +1905,12 @@ function highlightPath(sourceId, targetId) {
     pathHighlightTimeout = null;
   }
   
+  // Reset graph to default state first to clear any previous traces/highlights
+  resetGraphHighlight();
+
+  const isPing = highlightType === 'ping';
+  const highlightColor = isPing ? '#00d2ff' : '#ff9c3a'; // Cyan for ping, Orange for trace
+
   const path = findShortestPath(sourceId, targetId);
   if (!path || path.length < 2) {
     showToast('No active connection path found between devices', 'warning');
@@ -1463,11 +1928,11 @@ function highlightPath(sourceId, targetId) {
         id: node.id,
         color: { 
           background: colors.background, 
-          border: '#ff9c3a', 
-          highlight: { background: colors.background, border: '#ff9c3a' } 
+          border: highlightColor, 
+          highlight: { background: colors.background, border: highlightColor } 
         },
         borderWidth: 3,
-        shadow: { enabled: true, color: '#ff9c3a', size: 15, x: 0, y: 0 }
+        shadow: { enabled: true, color: highlightColor, size: 15, x: 0, y: 0 }
       };
     }
     return {
@@ -1491,9 +1956,9 @@ function highlightPath(sourceId, targetId) {
     if (pathEdgeIds.includes(edge.id)) {
       return {
         id: edge.id,
-        color: { color: '#ff9c3a', highlight: '#ff9c3a' },
+        color: { color: highlightColor, highlight: highlightColor },
         width: 5,
-        shadow: { enabled: true, color: '#ff9c3a', size: 10 },
+        shadow: { enabled: true, color: highlightColor, size: 10 },
         smooth: { type: 'curvedCW', roundness: 0.1 },
         dashing: true
       };
@@ -1515,11 +1980,6 @@ function highlightPath(sourceId, targetId) {
     animation: { duration: 600, easingFunction: 'easeInOutQuad' }
   });
   
-  showToast('Path highlighted in orange', 'info');
-  
-  // Automatically clear highight after 5 seconds
-  pathHighlightTimeout = setTimeout(() => {
-    resetGraphHighlight();
-  }, 5000);
+  showToast(isPing ? 'Ping path highlighted in cyan' : 'Traceroute path highlighted in orange', 'info');
 }
 

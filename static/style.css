@@ -43,6 +43,21 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
 .export-btn:not(:disabled):hover { color: #c9d1d9; }
 .export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.delete-btn { color: #ff7b72; border-color: #30363d; }
+.delete-btn:not(:disabled):hover { background: #3a1a1a; border-color: #f85149; color: #ff7b72; }
+.delete-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.action-btn.active-editing {
+  background: #238636;
+  border-color: #2ea043;
+  color: #ffffff;
+}
+.action-btn.active-editing:hover {
+  background: #2ea043;
+  border-color: #3fb950;
+  color: #ffffff;
+}
+
 .gh-link { font-size: 0.82rem; color: #58a6ff; text-decoration: none; white-space: nowrap; }
 .gh-link:hover { text-decoration: underline; }
 
@@ -420,6 +435,19 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23c9d1d9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 3 21 3 21 9'%3E%3C/polyline%3E%3Cpolyline points='9 21 3 21 3 15'%3E%3C/polyline%3E%3Cline x1='21' y1='3' x2='14' y2='10'%3E%3C/line%3E%3Cline x1='3' y1='21' x2='10' y2='14'%3E%3C/line%3E%3C/svg%3E") !important;
 }
 
+.vis-network .vis-navigation {
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Push vis.js navigation controls up when console drawer is open/minimized */
+#network-wrapper:has(#terminal-drawer:not(.closed):not(.minimized)) .vis-network .vis-navigation {
+  transform: translateY(-245px) !important;
+}
+
+#network-wrapper:has(#terminal-drawer.minimized) .vis-network .vis-navigation {
+  transform: translateY(-38px) !important;
+}
+
 /* ============================================================
    Modals
    ============================================================ */
@@ -773,5 +801,12 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   font-family: inherit;
   font-size: inherit;
   padding: 0;
+}
+
+.terminal-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+  background: transparent;
 }
 

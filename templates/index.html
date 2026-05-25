@@ -6,7 +6,7 @@
   <title>Network Topology Visualizer</title>
   <meta name="description" content="Interactive multi-layer network topology diagram. Upload a JSON or YAML inventory and visualize your network in seconds.">
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=1.0.3">
 </head>
 <body>
 
@@ -28,16 +28,21 @@
       </div>
       <div class="header-actions">
         <button class="action-btn" onclick="clearLayout()">&#10010; New</button>
-        <button id="btn-done-adding" class="action-btn hidden" onclick="stopAdding()" title="Finish adding nodes/edges">&#10004; Done Adding</button>
+        <button id="btn-edit-toggle" class="action-btn" onclick="toggleEditMode()" title="Toggle editing network diagram">&#9998; Edit Layout</button>
         <label class="upload-btn" id="upload-label">
           &#128194; Upload JSON/YAML
           <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
         </label>
         <button class="action-btn" onclick="openDiscoverModal()" title="Discover Network Topology">&#128269; Discover</button>
-        <button class="action-btn" onclick="loadSample()">Load Sample</button>
+        <select id="select-server-layout" class="action-btn" onchange="loadServerLayout(this.value)" style="height: 31px; padding: 4px 10px; cursor: pointer; outline: none; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;">
+          <option value="">-- Load Layout --</option>
+        </select>
+        <button class="action-btn delete-btn" onclick="deleteCurrentLayout()" id="btn-delete-layout" disabled title="Delete selected layout from server">&#10006; Delete</button>
+        <button class="action-btn export-btn" onclick="renameCurrentLayout()" id="btn-rename-layout" disabled title="Rename selected layout">&#9998; Rename</button>
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
         <button class="action-btn export-btn" onclick="exportJSON()" id="btn-export-json" disabled title="Save diagram as JSON">&#128190; Save JSON</button>
+        <button class="action-btn export-btn" onclick="saveToServer()" id="btn-save-server" disabled title="Save current topology to server">&#9733; Save to Server</button>
         <div class="live-indicator hidden" id="live-indicator" title="Live topology feed active">
           <span class="live-dot"></span><span>LIVE</span>
         </div>
@@ -146,7 +151,7 @@
             <div id="terminal-output" class="terminal-output"></div>
             <div class="terminal-input-line">
               <span class="terminal-prompt" id="terminal-prompt">&gt;</span>
-              <input type="text" id="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type a command...">
+              <input type="text" id="terminal-input" class="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type a command...">
             </div>
           </div>
         </div>
@@ -248,7 +253,6 @@
   <div id="context-menu" class="context-menu hidden">
     <div class="menu-item" id="menu-copy" onclick="handleMenuCopy()">Copy</div>
     <div class="menu-item" id="menu-paste" onclick="handleMenuPaste()">Paste</div>
-    <div class="menu-item" id="menu-console" onclick="handleMenuConsole()">Open Console</div>
   </div>
 
   <!-- Discover Modal -->
@@ -291,6 +295,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=1.0.2"></script>
+  <script src="/static/app.js?v=1.0.3"></script>
 </body>
 </html>

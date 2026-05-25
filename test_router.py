@@ -143,6 +143,61 @@ def handle_client(client_sock):
                                 "GigabitEthernet1/0/1   10.0.0.1        YES manual up                    up\r\n"
                                 "Loopback0              127.0.0.1       YES manual up                    up\r\n"
                             )
+                        elif (
+                            len(parts) > 3
+                            and parts[1].lower() == "lldp"
+                            and parts[2].lower().startswith("neighbor")
+                            and parts[3].lower().startswith("detail")
+                        ):
+                            chan.send(
+                                "Local Intf: Gi1/0/1\r\n"
+                                "Chassis id: 0011.2233.4455\r\n"
+                                "Port id: Gi1/0/24\r\n"
+                                "Port Description: GigabitEthernet1/0/24\r\n"
+                                "System Name: dist-sw-01\r\n"
+                                "System Description:\r\n"
+                                "Cisco IOS Software, C3750 Software (C3750-IPSERVICESK9-M), Version 12.2(55)SE8, RELEASE SOFTWARE (fc1)\r\n"
+                                "Technical Support: http://www.cisco.com/techsupport\r\n"
+                                "Copyright (c) 1986-2013 by Cisco Systems, Inc.\r\n"
+                                "Compiled Wed 18-Dec-13 14:11 by prod_rel_team\r\n"
+                                "Time remaining: 95 seconds\r\n"
+                                "System Capabilities: B,R\r\n"
+                                "Enabled Capabilities: B,R\r\n"
+                                "Management Addresses:\r\n"
+                                "    IP: 127.0.0.1:2222\r\n"
+                                "Auto Negotiation: supported, enabled\r\n"
+                                "Physical media capabilities:\r\n"
+                                "    1000baseT(FD)\r\n"
+                                "    100baseTX(FD)\r\n"
+                                "    100baseTX(HD)\r\n"
+                                "    10baseT(FD)\r\n"
+                                "    10baseT(HD)\r\n"
+                                "Media Attachment Unit type: 16\r\n"
+                                "Vlan ID: 1\r\n"
+                                "Peer Source MAC: 0011.2233.4455\r\n"
+                                "\r\n"
+                                "----------------------------------------\r\n"
+                            )
+                        elif (
+                            len(parts) > 3
+                            and parts[1].lower() == "cdp"
+                            and parts[2].lower().startswith("neighbor")
+                            and parts[3].lower().startswith("detail")
+                        ):
+                            chan.send(
+                                "Device ID: dist-sw-01\r\n"
+                                "Entry address(es):\r\n"
+                                "  IP address: 127.0.0.1\r\n"
+                                "Platform: Cisco C3750, Capabilities: Router Switch\r\n"
+                                "Interface: GigabitEthernet1/0/1,  Port ID (outgoing port): GigabitEthernet1/0/24\r\n"
+                                "Version :\r\n"
+                                "Cisco IOS Software, C3750 Software (C3750-IPSERVICESK9-M), Version 12.2(55)SE8, RELEASE SOFTWARE (fc1)\r\n"
+                                "Technical Support: http://www.cisco.com/techsupport\r\n"
+                                "Copyright (c) 1986-2013 by Cisco Systems, Inc.\r\n"
+                                "Compiled Wed 18-Dec-13 14:11 by prod_rel_team\r\n"
+                                "\r\n"
+                                "----------------------------------------\r\n"
+                            )
                         else:
                             # Silence output for other show requests to let netmiko auto-setup proceed
                             pass

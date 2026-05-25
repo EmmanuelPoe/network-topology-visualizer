@@ -13,6 +13,8 @@ dependencies = [
     "networkx>=3.0",
     "netmiko>=4.0.0",
     "ntc-templates>=4.0.0",
+    "numpy>=1.20.0",
+    "scipy>=1.8.0",
 ]
 
 [build-system]

@@ -71,6 +71,8 @@ class Device(BaseModel):
     layer: str = "core"
     ip: Optional[str] = None
     platform: Optional[str] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
 
     model_config = {"populate_by_name": True}
 
@@ -260,9 +262,21 @@ def _check_api_key(x_api_key: Optional[str]) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
-    return HTMLResponse(
-        (Path(__file__).parent.parent / "templates" / "index.html").read_text()
+    import time
+    import re
+
+    html_path = Path(__file__).parent.parent / "templates" / "index.html"
+    html = html_path.read_text()
+    ts = str(int(time.time()))
+    html = re.sub(
+        r'src="/static/app\.js(\?v=[^"]*)?"', f'src="/static/app.js?v={ts}"', html
     )
+    html = re.sub(
+        r'href="/static/style\.css(\?v=[^"]*)?"',
+        f'href="/static/style.css?v={ts}"',
+        html,
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/api/sample")
@@ -331,6 +345,151 @@ async def discover_topology(req: DiscoverRequest) -> JSONResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Discovery failed: {exc}")
+
+
+@app.get("/api/layouts")
+async def list_layouts() -> JSONResponse:
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        files = []
+        for p in sample_dir.glob("*.json"):
+            files.append(p.name)
+        for p in sample_dir.glob("*.yaml"):
+            files.append(p.name)
+        for p in sample_dir.glob("*.yml"):
+            files.append(p.name)
+        return JSONResponse({"layouts": sorted(files)})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list layouts: {exc}")
+
+
+@app.get("/api/layouts/{filename}")
+async def get_layout(filename: str) -> JSONResponse:
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        safe_path = (sample_dir / filename).resolve()
+        if not safe_path.is_relative_to(sample_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        if not safe_path.exists():
+            raise HTTPException(status_code=404, detail="Layout not found")
+
+        content = safe_path.read_text()
+        raw = (
+            yaml.safe_load(content)
+            if filename.endswith((".yaml", ".yml"))
+            else json.loads(content)
+        )
+        parsed = parse_topology(raw)
+        manager.latest_topology = parsed
+        return JSONResponse(parsed)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to load layout: {exc}")
+
+
+@app.delete("/api/layouts/{filename}")
+async def delete_layout(filename: str) -> JSONResponse:
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        safe_path = (sample_dir / filename).resolve()
+
+        # Block deleting default topology layout
+        if safe_path.name == "topology.json":
+            raise HTTPException(
+                status_code=400, detail="Cannot delete the default layout"
+            )
+
+        if not safe_path.is_relative_to(sample_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        if not safe_path.exists():
+            raise HTTPException(status_code=404, detail="Layout not found")
+
+        safe_path.unlink()
+        return JSONResponse(
+            {"ok": True, "detail": f"Layout {filename} removed successfully"}
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete layout: {exc}")
+
+
+@app.patch("/api/layouts/{filename}")
+async def rename_layout(filename: str, new_name: str) -> JSONResponse:
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        safe_path = (sample_dir / filename).resolve()
+
+        # Block renaming default topology layout
+        if safe_path.name == "topology.json":
+            raise HTTPException(
+                status_code=400, detail="Cannot rename the default layout"
+            )
+
+        if not safe_path.is_relative_to(sample_dir.resolve()) or not safe_path.exists():
+            raise HTTPException(status_code=404, detail="Layout not found")
+
+        # Sanitize new name
+        clean_new_name = "".join(
+            [c for c in new_name if c.isalnum() or c in " _-"]
+        ).strip()
+        clean_new_name = clean_new_name.lower().replace(" ", "_")
+        if not clean_new_name.endswith(".json"):
+            clean_new_name += ".json"
+
+        new_path = sample_dir / clean_new_name
+        if not new_path.resolve().is_relative_to(sample_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid new name")
+
+        if new_path.exists() and new_path.resolve() != safe_path.resolve():
+            raise HTTPException(
+                status_code=409, detail="A layout with that name already exists"
+            )
+
+        # Rename
+        safe_path.rename(new_path)
+        return JSONResponse({"ok": True, "filename": new_path.name})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to rename layout: {exc}")
+
+
+@app.post("/api/save")
+async def save_topology(req: Topology, name: Optional[str] = None) -> JSONResponse:
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        if name:
+            safe_name = "".join([c for c in name if c.isalnum() or c in " _-"]).strip()
+            safe_name = safe_name.lower().replace(" ", "_")
+            if not safe_name.endswith(".json"):
+                safe_name += ".json"
+            save_path = sample_dir / safe_name
+        else:
+            save_path = sample_dir / "topology.json"
+
+        if not save_path.resolve().is_relative_to(sample_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid layout name")
+
+        data = req.model_dump()
+        save_path.write_text(json.dumps(data, indent=2))
+        manager.latest_topology = data
+        await manager.broadcast(data)
+        return JSONResponse(
+            {
+                "ok": True,
+                "devices": len(data["devices"]),
+                "links": len(data["links"]),
+                "filename": save_path.name,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save topology: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +824,7 @@ class MockTerminalSession:
             actions.append(
                 {
                     "type": "path_highlight",
+                    "highlight_type": "ping",
                     "source": self.device_id,
                     "target": target_device.get("id"),
                 }
@@ -702,6 +862,7 @@ class MockTerminalSession:
                 actions.append(
                     {
                         "type": "path_highlight",
+                        "highlight_type": "trace",
                         "source": self.device_id,
                         "target": target_device.get("id"),
                     }
@@ -775,6 +936,7 @@ async def ws_terminal(
                         await websocket.send_json(
                             {
                                 "type": "path_highlight",
+                                "highlight_type": action.get("highlight_type", "trace"),
                                 "source": action["source"],
                                 "target": action["target"],
                             }
@@ -881,6 +1043,58 @@ async def ws_terminal(
             while True:
                 # Command string received from websocket
                 client_input = await websocket.receive_text()
+
+                # Try to parse client_input as a JSON control packet first (e.g. resize event)
+                try:
+                    msg = json.loads(client_input)
+                    if isinstance(msg, dict) and msg.get("type") == "resize":
+                        cols = msg.get("cols", 80)
+                        rows = msg.get("rows", 24)
+                        if (
+                            hasattr(net_connect, "remote_conn")
+                            and net_connect.remote_conn
+                        ):
+                            try:
+                                await loop.run_in_executor(
+                                    _executor,
+                                    net_connect.remote_conn.resize_pty,
+                                    cols,
+                                    rows,
+                                )
+                                logger.info(f"PTY resized to {cols}x{rows}")
+                            except Exception as re_err:
+                                logger.warning(f"Failed to resize SSH PTY: {re_err}")
+                        continue
+                except json.JSONDecodeError:
+                    # Normal terminal command line, proceed with check & execution
+                    pass
+
+                cmd_line = client_input.strip()
+                if cmd_line:
+                    parts = cmd_line.split()
+                    base_cmd = parts[0].lower()
+                    if base_cmd in ["ping", "traceroute", "trace"] and len(parts) > 1:
+                        target = parts[1]
+                        target_device = None
+                        for d in topology_data.get("devices", []):
+                            if (
+                                d.get("ip") == target
+                                or d.get("id") == target
+                                or d.get("label", "").lower() == target.lower()
+                            ):
+                                target_device = d
+                                break
+                        if target_device:
+                            await websocket.send_json(
+                                {
+                                    "type": "path_highlight",
+                                    "highlight_type": "ping"
+                                    if base_cmd == "ping"
+                                    else "trace",
+                                    "source": device_id,
+                                    "target": target_device["id"],
+                                }
+                            )
 
                 # Write command synchronously in executor
                 await loop.run_in_executor(
