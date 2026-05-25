@@ -1458,7 +1458,6 @@ function adjustViewportForTerminal(animate = true) {
     x: baselineCenter.x,
     y: baselineCenter.y + (D / 2) / targetScale
   };
-
   // Perform smooth transition to the target state
   network.moveTo({
     position: targetCenter,
@@ -1467,55 +1466,452 @@ function adjustViewportForTerminal(animate = true) {
   });
 }
 
+class TerminalSession {
+  constructor(deviceId, deviceName) {
+    this.deviceId = deviceId;
+    this.deviceName = deviceName;
+    this.mode = 'mock';
+    this.socket = null;
+    this.history = [];
+    this.historyIndex = 0;
+    this.activeTraceSource = null;
+    this.activeTracePath = [];
+    this.status = 'disconnected';
+    this.statusText = 'disconnected';
+    this.lastPrompt = '>';
+    this.sshUsername = 'admin';
+    this.sshPassword = '';
+
+    try {
+      const hist = localStorage.getItem('netvis_terminal_history_' + deviceId);
+      this.history = hist ? JSON.parse(hist) : [];
+    } catch (e) {
+      this.history = [];
+    }
+    this.historyIndex = this.history.length;
+
+    this.createDomElement();
+  }
+
+  createDomElement() {
+    const contentArea = document.getElementById('terminal-content-area');
+    if (!contentArea) return;
+
+    this.bodyEl = document.createElement('div');
+    this.bodyEl.className = 'terminal-tab-body hidden';
+    this.bodyEl.dataset.deviceId = this.deviceId;
+    
+    this.bodyEl.innerHTML = `
+      <div class="terminal-ssh-creds terminal-creds-form hidden">
+        <span class="terminal-creds-label">SSH credentials required for real connection:</span>
+        <div class="terminal-creds-inputs">
+          <input type="text" class="ssh-username" placeholder="Username" value="${this.sshUsername}">
+          <input type="password" class="ssh-password" placeholder="Password">
+          <button class="ctrl-btn active" style="width: auto; margin-bottom: 0; padding: 4px 12px; font-size: 0.75rem;">Connect</button>
+        </div>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-output"></div>
+        <div class="terminal-input-line">
+          <span class="terminal-prompt">${this.lastPrompt}</span>
+          <input type="text" class="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type a command...">
+        </div>
+      </div>
+    `;
+    
+    contentArea.appendChild(this.bodyEl);
+
+    // Credentials Connect Event
+    const connectBtn = this.bodyEl.querySelector('.terminal-creds-inputs button');
+    connectBtn.addEventListener('click', () => {
+      const u = this.bodyEl.querySelector('.ssh-username').value.trim();
+      const p = this.bodyEl.querySelector('.ssh-password').value;
+      if (!u || !p) {
+        showToast('Username and password required for SSH', 'warning');
+        return;
+      }
+      this.bodyEl.querySelector('.terminal-ssh-creds').classList.add('hidden');
+      this.sshUsername = u;
+      this.sshPassword = p;
+      this.connectSocket(u, p);
+    });
+
+    // Auto-focus input on clicking anywhere inside terminal body
+    const bodyContainer = this.bodyEl.querySelector('.terminal-body');
+    const inputEl = this.bodyEl.querySelector('.terminal-input');
+    bodyContainer.addEventListener('click', () => {
+      inputEl.focus();
+    });
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = inputEl.value;
+        const trimmedVal = val.trim().toLowerCase();
+        
+        if (trimmedVal.startsWith('traceroute') || trimmedVal.startsWith('trace')) {
+          this.activeTraceSource = this.deviceId;
+          this.activeTracePath = [this.deviceId];
+          if (activeSessionId === this.deviceId) {
+            activeTraceSource = this.deviceId;
+            activeTracePath = [this.deviceId];
+            resetGraphHighlight();
+          }
+        } else if (trimmedVal.length > 0) {
+          this.activeTraceSource = null;
+          this.activeTracePath = [];
+          if (activeSessionId === this.deviceId) {
+            activeTraceSource = null;
+            activeTracePath = [];
+            resetGraphHighlight();
+          }
+        }
+
+        if (val.trim() && (this.history.length === 0 || this.history[this.history.length - 1] !== val)) {
+          this.history.push(val);
+          localStorage.setItem('netvis_terminal_history_' + this.deviceId, JSON.stringify(this.history));
+        }
+        this.historyIndex = this.history.length;
+
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(val + '\r');
+        } else {
+          this.appendText("\r\nSession not connected.\r\n");
+        }
+        inputEl.value = '';
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (this.historyIndex > 0) {
+          this.historyIndex--;
+          inputEl.value = this.history[this.historyIndex];
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (this.historyIndex < this.history.length - 1) {
+          this.historyIndex++;
+          inputEl.value = this.history[this.historyIndex];
+        } else {
+          this.historyIndex = this.history.length;
+          inputEl.value = '';
+        }
+      }
+    });
+  }
+
+  appendText(text) {
+    const out = this.bodyEl.querySelector('.terminal-output');
+    if (!out) return;
+
+    // Parse traceroute hops in real-time
+    if (this.activeTraceSource && currentTopology) {
+      const lines = text.split(/\r?\n/);
+      lines.forEach(line => {
+        const hopMatch = line.match(/^\s*(\d+)\s+.*?\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
+        if (hopMatch) {
+          const hopIp = hopMatch[2];
+          const device = currentTopology.devices.find(d => d.ip === hopIp);
+          if (device && !this.activeTracePath.includes(device.id)) {
+            if (this.activeTracePath.length > 0) {
+              const lastHopId = this.activeTracePath[this.activeTracePath.length - 1];
+              const gapPath = findShortestPath(lastHopId, device.id);
+              if (gapPath && gapPath.length > 1) {
+                for (let i = 1; i < gapPath.length; i++) {
+                  if (!this.activeTracePath.includes(gapPath[i])) {
+                    this.activeTracePath.push(gapPath[i]);
+                  }
+                }
+              } else {
+                this.activeTracePath.push(device.id);
+              }
+            } else {
+              this.activeTracePath.push(device.id);
+            }
+            if (activeSessionId === this.deviceId) {
+              activeTracePath = this.activeTracePath;
+              highlightExplicitPath(this.activeTracePath, 'trace');
+            }
+          }
+        }
+      });
+    }
+
+    const promptRegex = /([A-Za-z0-9._-]+(?:\([^)]+\))?[>#])\s*$/;
+    const loginRegex = /(Username:|Password:)\s*$/i;
+    let match = text.match(promptRegex) || text.match(loginRegex);
+    if (match) {
+      this.lastPrompt = match[1];
+      const promptEl = this.bodyEl.querySelector('.terminal-prompt');
+      if (promptEl) promptEl.textContent = this.lastPrompt;
+    }
+
+    let formatted = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\n\r/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n/g, '<br>');
+
+    const div = document.createElement('span');
+    div.innerHTML = formatted;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  clearOutput() {
+    const out = this.bodyEl.querySelector('.terminal-output');
+    if (out) out.innerHTML = '';
+  }
+
+  updateStatus(dotClass, text) {
+    this.status = dotClass;
+    this.statusText = text;
+    
+    // Update tab status dot
+    const tabEl = document.querySelector(`.terminal-tab[data-device-id="${this.deviceId}"]`);
+    if (tabEl) {
+      const tabDot = tabEl.querySelector('.terminal-tab-dot');
+      if (tabDot) {
+        tabDot.className = `terminal-tab-dot ${dotClass}`;
+      }
+    }
+
+    if (activeSessionId === this.deviceId) {
+      updateUIStatus(dotClass, text, this.lastPrompt);
+    }
+  }
+
+  connectSocket(username = null, password = null) {
+    if (this.socket) {
+      this.socket.close();
+    }
+    
+    if (!currentTopology) return;
+    const device = currentTopology.devices.find(d => d.id === this.deviceId);
+    if (!device) return;
+
+    this.updateStatus('connecting', 'connecting');
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let url = `${proto}//${location.host}/ws/terminal/${this.deviceId}?mode=${this.mode}`;
+    url += `&ip=${encodeURIComponent(device.ip || '')}`;
+    url += `&platform=${encodeURIComponent(device.platform || 'cisco_ios')}`;
+    
+    if (this.mode === 'ssh' && username && password) {
+      url += `&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    }
+
+    this.socket = new WebSocket(url);
+
+    this.socket.onopen = () => {
+      this.updateStatus('connected', 'connected');
+      if (activeSessionId === this.deviceId) {
+        const inputEl = this.bodyEl.querySelector('.terminal-input');
+        if (inputEl) inputEl.focus();
+        sendTerminalResize();
+      }
+    };
+
+    this.socket.onmessage = event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data && data.type) {
+          if (data.type === 'output') {
+            this.appendText(data.text);
+          } else if (data.type === 'path_highlight') {
+            if (this.activeTracePath && this.activeTracePath.length > 1) {
+              if (activeSessionId === this.deviceId) {
+                activeTracePath = this.activeTracePath;
+                highlightExplicitPath(this.activeTracePath, data.highlight_type || 'trace');
+                showToast(data.highlight_type === 'ping' ? 'Ping path highlighted in cyan' : 'Traceroute path highlighted in orange', 'info');
+              }
+            } else {
+              if (activeSessionId === this.deviceId) {
+                highlightPath(data.source, data.target, data.highlight_type || 'trace');
+              }
+            }
+          } else if (data.type === 'clear') {
+            this.clearOutput();
+          }
+          return;
+        }
+      } catch (e) {}
+      this.appendText(event.data);
+    };
+
+    this.socket.onclose = () => {
+      this.updateStatus('disconnected', 'disconnected');
+      this.appendText("\r\n*** Session closed ***\r\n");
+    };
+
+    this.socket.onerror = () => {
+      this.updateStatus('disconnected', 'error');
+      this.appendText("\r\n*** Connection error ***\r\n");
+    };
+  }
+
+  destroy() {
+    if (this.socket) {
+      this.socket.close();
+    }
+    if (this.bodyEl && this.bodyEl.parentNode) {
+      this.bodyEl.parentNode.removeChild(this.bodyEl);
+    }
+  }
+}
+
+let terminalSessions = {};
+let activeSessionId = null;
+
+function focusActiveSessionInput() {
+  if (activeSessionId && terminalSessions[activeSessionId]) {
+    const session = terminalSessions[activeSessionId];
+    const inputEl = session.bodyEl.querySelector('.terminal-input');
+    if (inputEl) inputEl.focus();
+  }
+}
+
+function updateUIStatus(dotClass, text, lastPrompt) {
+  const dot = document.getElementById('terminal-dot');
+  const status = document.getElementById('terminal-status');
+  
+  if (dot) dot.className = `terminal-dot ${dotClass}`;
+  if (status) {
+    status.className = `terminal-status ${dotClass}`;
+    status.textContent = text;
+  }
+  
+  if (activeSessionId) {
+    const session = terminalSessions[activeSessionId];
+    if (session && session.bodyEl) {
+      const inputEl = session.bodyEl.querySelector('.terminal-input');
+      const promptEl = session.bodyEl.querySelector('.terminal-prompt');
+      
+      if (promptEl) promptEl.textContent = lastPrompt || '>';
+      if (inputEl) {
+        if (dotClass === 'disconnected') {
+          inputEl.placeholder = 'Type a command...';
+        } else {
+          inputEl.placeholder = '';
+        }
+      }
+    }
+  }
+}
+
+function switchSession(deviceId) {
+  const nextSession = terminalSessions[deviceId];
+  if (!nextSession) return;
+
+  // Deactivate active UI components
+  const activeTab = document.querySelector('.terminal-tab.active');
+  if (activeTab) activeTab.classList.remove('active');
+  
+  const activeBody = document.querySelector('.terminal-tab-body:not(.hidden)');
+  if (activeBody) activeBody.classList.add('hidden');
+
+  // Activate next UI components
+  activeSessionId = deviceId;
+  terminalDeviceId = deviceId;
+
+  const newTab = document.querySelector(`.terminal-tab[data-device-id="${deviceId}"]`);
+  if (newTab) newTab.classList.add('active');
+  
+  if (nextSession.bodyEl) {
+    nextSession.bodyEl.classList.remove('hidden');
+  }
+
+  // Update header parameters
+  const selectEl = document.getElementById('terminal-mode-select');
+  if (selectEl) {
+    selectEl.value = nextSession.mode;
+  }
+  updateUIStatus(nextSession.status, nextSession.statusText, nextSession.lastPrompt);
+
+  // Restore path highlights
+  resetGraphHighlight();
+  activeTraceSource = nextSession.activeTraceSource;
+  activeTracePath = nextSession.activeTracePath;
+  if (nextSession.activeTracePath && nextSession.activeTracePath.length > 1) {
+    highlightExplicitPath(nextSession.activeTracePath, 'trace');
+  }
+
+  focusActiveSessionInput();
+}
+
+function closeTab(deviceId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  const session = terminalSessions[deviceId];
+  if (!session) return;
+  
+  session.destroy();
+  delete terminalSessions[deviceId];
+
+  const tabEl = document.querySelector(`.terminal-tab[data-device-id="${deviceId}"]`);
+  if (tabEl && tabEl.parentNode) {
+    tabEl.parentNode.removeChild(tabEl);
+  }
+
+  if (activeSessionId === deviceId) {
+    const remaining = Object.keys(terminalSessions);
+    if (remaining.length > 0) {
+      switchSession(remaining[0]);
+    } else {
+      closeTerminal(true);
+    }
+  }
+}
+
 function openTerminalForDevice(deviceId) {
   if (!currentTopology) return;
   const device = currentTopology.devices.find(d => d.id === deviceId);
   if (!device) return;
 
-  terminalDeviceId = deviceId;
-  const selectEl = document.getElementById('terminal-mode-select');
-  terminalMode = selectEl.value;
-
-  document.getElementById('terminal-title').textContent = `Console: ${device.label}`;
-  
-  // Show drawer
   const drawer = document.getElementById('terminal-drawer');
   drawer.classList.remove('closed');
   drawer.classList.remove('minimized');
-  document.getElementById('terminal-min-btn').textContent = '━';
+  const minBtn = document.getElementById('terminal-min-btn');
+  if (minBtn) minBtn.textContent = '━';
 
-  // Load history from localStorage
-  try {
-    const hist = localStorage.getItem('netvis_terminal_history_' + deviceId);
-    terminalHistory = hist ? JSON.parse(hist) : [];
-  } catch (e) {
-    terminalHistory = [];
+  if (!terminalSessions[deviceId]) {
+    const session = new TerminalSession(deviceId, device.label);
+    terminalSessions[deviceId] = session;
+
+    const tabsContainer = document.getElementById('terminal-tabs');
+    const tabEl = document.createElement('div');
+    tabEl.className = 'terminal-tab';
+    tabEl.dataset.deviceId = deviceId;
+    tabEl.innerHTML = `
+      <span class="terminal-tab-dot ${session.status}"></span>
+      <span class="terminal-tab-name">${device.label}</span>
+      <span class="terminal-tab-close">&times;</span>
+    `;
+
+    tabEl.addEventListener('click', () => {
+      switchSession(deviceId);
+    });
+
+    const closeBtn = tabEl.querySelector('.terminal-tab-close');
+    closeBtn.addEventListener('click', (e) => {
+      closeTab(deviceId, e);
+    });
+
+    tabsContainer.appendChild(tabEl);
+
+    const selectEl = document.getElementById('terminal-mode-select');
+    session.mode = selectEl ? selectEl.value : 'mock';
+
+    if (session.mode === 'mock') {
+      session.connectSocket();
+    } else {
+      const credsForm = session.bodyEl.querySelector('.terminal-creds-form');
+      if (credsForm) credsForm.classList.remove('hidden');
+      session.updateStatus('disconnected', 'offline');
+      session.appendText("SSH Session requested. Please enter credentials above and click Connect.\r\n");
+    }
   }
-  terminalHistoryIndex = terminalHistory.length;
 
-  // Toggle SSH Credentials form if we were left in SSH mode
-  const credsForm = document.getElementById('terminal-ssh-creds');
-  if (terminalMode === 'ssh') {
-    credsForm.classList.remove('hidden');
-  } else {
-    credsForm.classList.add('hidden');
-  }
-
-  clearTerminalOutput();
-  
-  if (terminalMode === 'mock') {
-    connectTerminalSocket();
-  } else {
-    updateTerminalStatus('disconnected', 'offline');
-    appendTerminalText("Choose mode or enter credentials to start session.\r\n");
-  }
-
-  // Focus terminal input
-  setTimeout(() => {
-    document.getElementById('terminal-input').focus();
-  }, 100);
-
-  // Keep all devices within visible view above terminal drawer
+  switchSession(deviceId);
   adjustViewportForTerminal(true);
 }
 
@@ -1525,23 +1921,25 @@ function closeTerminal(adjustViewport = true) {
   drawer.classList.add('closed');
   drawer.classList.remove('minimized');
   
-  if (terminalSocket) {
-    terminalSocket.close();
-    terminalSocket = null;
-  }
-  terminalDeviceId = null;
+  Object.keys(terminalSessions).forEach(deviceId => {
+    terminalSessions[deviceId].destroy();
+  });
+  terminalSessions = {};
+  activeSessionId = null;
   
+  const tabsContainer = document.getElementById('terminal-tabs');
+  if (tabsContainer) tabsContainer.innerHTML = '';
+  
+  terminalDeviceId = null;
   activeTraceSource = null;
   activeTracePath = [];
 
-  // Clear path highlight immediately if console is closed
   if (pathHighlightTimeout) {
     clearTimeout(pathHighlightTimeout);
     pathHighlightTimeout = null;
   }
   resetGraphHighlight();
 
-  // Reset viewport to center nodes in full screen
   if (adjustViewport) {
     adjustViewportForTerminal(true);
   }
@@ -1554,273 +1952,62 @@ function toggleTerminalMinimize() {
   if (drawer.classList.contains('minimized')) {
     drawer.classList.remove('minimized');
     minBtn.textContent = '━';
-    document.getElementById('terminal-input').focus();
-    setTimeout(sendTerminalResize, 320); // Wait for transition animation
+    focusActiveSessionInput();
+    setTimeout(sendTerminalResize, 320);
   } else {
     drawer.classList.add('minimized');
     minBtn.textContent = '┠';
   }
 
-  // Adjust viewport based on minimized/expanded terminal state
   adjustViewportForTerminal(true);
 }
 
 function handleTerminalModeChange(mode) {
-  terminalMode = mode;
-  if (terminalSocket) {
-    terminalSocket.close();
-    terminalSocket = null;
+  if (!activeSessionId) return;
+  const session = terminalSessions[activeSessionId];
+  if (!session) return;
+  
+  session.mode = mode;
+  if (session.socket) {
+    session.socket.close();
+    session.socket = null;
   }
   
-  clearTerminalOutput();
+  session.clearOutput();
   
-  const credsForm = document.getElementById('terminal-ssh-creds');
+  const credsForm = session.bodyEl.querySelector('.terminal-creds-form');
   if (mode === 'ssh') {
     credsForm.classList.remove('hidden');
-    updateTerminalStatus('disconnected', 'offline');
-    appendTerminalText("SSH Session requested. Please enter credentials above and click Connect.\r\n");
+    session.updateStatus('disconnected', 'offline');
+    session.appendText("SSH Session requested. Please enter credentials above and click Connect.\r\n");
   } else {
     credsForm.classList.add('hidden');
-    connectTerminalSocket();
+    session.connectSocket();
   }
-  document.getElementById('terminal-input').focus();
-}
-
-function updateTerminalStatus(dotClass, text) {
-  const dot = document.getElementById('terminal-dot');
-  const status = document.getElementById('terminal-status');
-  
-  dot.className = `terminal-dot ${dotClass}`;
-  status.className = `terminal-status ${dotClass}`;
-  status.textContent = text;
-
-  // Dynamically update placeholder and prompt text based on connection state
-  if (dotClass === 'disconnected') {
-    const promptEl = document.getElementById('terminal-prompt');
-    if (promptEl) promptEl.textContent = '>';
-    const inputEl = document.getElementById('terminal-input');
-    if (inputEl) inputEl.placeholder = 'Type a command...';
-  } else {
-    const inputEl = document.getElementById('terminal-input');
-    if (inputEl) inputEl.placeholder = '';
-  }
-}
-
-function connectTerminalSocket(username = null, password = null) {
-  if (terminalSocket) {
-    terminalSocket.close();
-  }
-  
-  if (!terminalDeviceId || !currentTopology) return;
-  const device = currentTopology.devices.find(d => d.id === terminalDeviceId);
-  if (!device) return;
-
-  updateTerminalStatus('connecting', 'connecting');
-
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let url = `${proto}//${location.host}/ws/terminal/${terminalDeviceId}?mode=${terminalMode}`;
-  
-  url += `&ip=${encodeURIComponent(device.ip || '')}`;
-  url += `&platform=${encodeURIComponent(device.platform || 'cisco_ios')}`;
-  
-  if (terminalMode === 'ssh' && username && password) {
-    url += `&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-  }
-
-  terminalSocket = new WebSocket(url);
-
-  terminalSocket.onopen = () => {
-    updateTerminalStatus('connected', 'connected');
-    document.getElementById('terminal-input').focus();
-    sendTerminalResize();
-  };
-
-  terminalSocket.onmessage = event => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data && data.type) {
-        if (data.type === 'output') {
-          appendTerminalText(data.text);
-        } else if (data.type === 'path_highlight') {
-          highlightPath(data.source, data.target, data.highlight_type || 'trace');
-        } else if (data.type === 'clear') {
-          clearTerminalOutput();
-        }
-        return;
-      }
-    } catch (e) {
-      // Not JSON, handle as raw text
-    }
-    appendTerminalText(event.data);
-  };
-
-  terminalSocket.onclose = () => {
-    updateTerminalStatus('disconnected', 'disconnected');
-    appendTerminalText("\r\n*** Session closed ***\r\n");
-  };
-
-  terminalSocket.onerror = () => {
-    updateTerminalStatus('disconnected', 'error');
-    appendTerminalText("\r\n*** Connection error ***\r\n");
-  };
-}
-
-function connectRealSsh() {
-  const user = document.getElementById('ssh-username').value.trim();
-  const pass = document.getElementById('ssh-password').value;
-  
-  if (!user || !pass) {
-    showToast('Username and password required for SSH', 'warning');
-    return;
-  }
-  
-  const credsForm = document.getElementById('terminal-ssh-creds');
-  credsForm.classList.add('hidden');
-  
-  connectTerminalSocket(user, pass);
+  focusActiveSessionInput();
 }
 
 function clearTerminalOutput() {
-  const out = document.getElementById('terminal-output');
-  if (out) out.innerHTML = '';
+  if (activeSessionId && terminalSessions[activeSessionId]) {
+    terminalSessions[activeSessionId].clearOutput();
+  }
 }
-
-function appendTerminalText(text) {
-  const out = document.getElementById('terminal-output');
-  if (!out) return;
-
-  // Parse traceroute hops in real-time if active
-  if (activeTraceSource && currentTopology) {
-    const lines = text.split(/\r?\n/);
-    lines.forEach(line => {
-      const hopMatch = line.match(/^\s*(\d+)\s+.*?\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
-      if (hopMatch) {
-        const hopIp = hopMatch[2];
-        const device = currentTopology.devices.find(d => d.ip === hopIp);
-        if (device && !activeTracePath.includes(device.id)) {
-          // Bridge the gap using BFS pathfinding if there is a gap
-          if (activeTracePath.length > 0) {
-            const lastHopId = activeTracePath[activeTracePath.length - 1];
-            const gapPath = findShortestPath(lastHopId, device.id);
-            if (gapPath && gapPath.length > 1) {
-              // Add all intermediate nodes along the path
-              for (let i = 1; i < gapPath.length; i++) {
-                if (!activeTracePath.includes(gapPath[i])) {
-                  activeTracePath.push(gapPath[i]);
-                }
-              }
-            } else {
-              activeTracePath.push(device.id);
-            }
-          } else {
-            activeTracePath.push(device.id);
-          }
-          highlightExplicitPath(activeTracePath, 'trace');
-        }
-      }
-    });
-  }
-
-  // Extract prompt dynamic updates (e.g. hostname> or hostname# or config mode or Username/Password)
-  const promptRegex = /([A-Za-z0-9._-]+(?:\([^)]+\))?[>#])\s*$/;
-  const loginRegex = /(Username:|Password:)\s*$/i;
-  
-  let match = text.match(promptRegex) || text.match(loginRegex);
-  if (match) {
-    const promptStr = match[1];
-    const promptEl = document.getElementById('terminal-prompt');
-    if (promptEl) {
-      promptEl.textContent = promptStr;
-    }
-    const matchIndex = text.lastIndexOf(match[0]);
-    if (matchIndex !== -1) {
-      text = text.substring(0, matchIndex);
-    }
-  }
-
-  // Format line endings for standard browser displaying
-  let formatted = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\n\r/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\n/g, '<br>');
-
-  const div = document.createElement('span');
-  div.innerHTML = formatted;
-  out.appendChild(div);
-  
-  // Auto scroll to bottom
-  out.scrollTop = out.scrollHeight;
-}
-
-// Wire up terminal input key actions
-document.getElementById('terminal-input').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter') {
-    const val = this.value;
-    
-    const trimmedVal = val.trim().toLowerCase();
-    if (trimmedVal.startsWith('traceroute') || trimmedVal.startsWith('trace')) {
-      activeTraceSource = terminalDeviceId;
-      activeTracePath = [terminalDeviceId];
-      resetGraphHighlight();
-    } else if (trimmedVal.length > 0) {
-      activeTraceSource = null;
-      activeTracePath = [];
-    }
-
-    // Add to history if not empty and not identical to last entry
-    if (val.trim() && (terminalHistory.length === 0 || terminalHistory[terminalHistory.length - 1] !== val)) {
-      terminalHistory.push(val);
-      if (terminalDeviceId) {
-        localStorage.setItem('netvis_terminal_history_' + terminalDeviceId, JSON.stringify(terminalHistory));
-      }
-    }
-    terminalHistoryIndex = terminalHistory.length;
-    
-    // Send via socket
-    if (terminalSocket && terminalSocket.readyState === WebSocket.OPEN) {
-      if (terminalMode === 'mock') {
-        const promptEl = document.getElementById('terminal-prompt');
-        const activePrompt = promptEl ? promptEl.textContent : '>';
-        appendTerminalText(`${activePrompt} ${val}\r\n`);
-      }
-      terminalSocket.send(val);
-    } else {
-      appendTerminalText(`\r\n${val}\r\n[Not connected]\r\n`);
-    }
-    
-    this.value = '';
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    if (terminalHistory.length > 0 && terminalHistoryIndex > 0) {
-      terminalHistoryIndex--;
-      this.value = terminalHistory[terminalHistoryIndex];
-    }
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (terminalHistoryIndex < terminalHistory.length - 1) {
-      terminalHistoryIndex++;
-      this.value = terminalHistory[terminalHistoryIndex];
-    } else {
-      terminalHistoryIndex = terminalHistory.length;
-      this.value = '';
-    }
-  }
-});
 
 function sendTerminalResize() {
-  if (!terminalSocket || terminalSocket.readyState !== WebSocket.OPEN) return;
-  const out = document.getElementById('terminal-output');
+  if (!activeSessionId) return;
+  const session = terminalSessions[activeSessionId];
+  if (!session || !session.socket || session.socket.readyState !== WebSocket.OPEN) return;
+  
+  const out = session.bodyEl.querySelector('.terminal-output');
   if (!out) return;
   
   const width = out.clientWidth;
   const height = out.clientHeight;
   
-  // Approximate character dimensions: ~8.2px width and ~17px height per character
   const cols = Math.floor(width / 8.2);
   const rows = Math.floor(height / 17);
   
-  terminalSocket.send(JSON.stringify({
+  session.socket.send(JSON.stringify({
     type: 'resize',
     cols: Math.max(40, cols),
     rows: Math.max(5, rows)
@@ -1829,15 +2016,8 @@ function sendTerminalResize() {
 
 window.addEventListener('resize', sendTerminalResize);
 
-// Auto focus input on clicking anywhere inside terminal body
-document.getElementById('terminal-body').addEventListener('click', () => {
-  document.getElementById('terminal-input').focus();
-});
-
 // ---------------------------------------------------------------------------
 // Shortest Path Finder & Visual Highlighting
-// ---------------------------------------------------------------------------
-
 function findShortestPath(startId, endId) {
   if (!currentTopology) return null;
   const adj = {};

@@ -113,39 +113,22 @@
       <!-- Terminal Drawer -->
       <div id="terminal-drawer" class="terminal-drawer closed">
         <div class="terminal-header">
-          <div class="terminal-header-left">
-            <span class="terminal-dot" id="terminal-dot"></span>
-            <span class="terminal-title" id="terminal-title">Console: None</span>
+          <div class="terminal-header-left" style="height: 100%;">
+            <div id="terminal-tabs" class="terminal-tabs"></div>
           </div>
           <div class="terminal-header-right">
+            <span class="terminal-dot" id="terminal-dot"></span>
+            <span class="terminal-status" id="terminal-status" style="margin-right: 5px;">Console: None</span>
             <select id="terminal-mode-select" class="terminal-select" onchange="handleTerminalModeChange(this.value)">
               <option value="mock">Mock Simulator</option>
               <option value="ssh">Real SSH</option>
             </select>
-            <span id="terminal-status" class="terminal-status disconnected">disconnected</span>
             <button class="terminal-btn" onclick="clearTerminalOutput()" title="Clear Console">&#128465;</button>
             <button class="terminal-btn" id="terminal-min-btn" onclick="toggleTerminalMinimize()" title="Minimize">&#9644;</button>
             <button class="terminal-btn" onclick="closeTerminal()" title="Close">&#10005;</button>
           </div>
         </div>
-        <div class="terminal-content" id="terminal-content-area">
-          <!-- Credentials prompt for SSH -->
-          <div id="terminal-ssh-creds" class="terminal-creds-form hidden">
-            <span class="terminal-creds-label">SSH credentials required for real connection:</span>
-            <div class="terminal-creds-inputs">
-              <input type="text" id="ssh-username" placeholder="Username" value="admin">
-              <input type="password" id="ssh-password" placeholder="Password">
-              <button class="ctrl-btn active" style="width: auto; margin-bottom: 0; padding: 4px 12px; font-size: 0.75rem;" onclick="connectRealSsh()">Connect</button>
-            </div>
-          </div>
-          <div class="terminal-body" id="terminal-body">
-            <div id="terminal-output" class="terminal-output"></div>
-            <div class="terminal-input-line">
-              <span class="terminal-prompt" id="terminal-prompt">&gt;</span>
-              <input type="text" id="terminal-input" class="terminal-input" autocomplete="off" spellcheck="false" placeholder="Type a command...">
-            </div>
-          </div>
-        </div>
+        <div class="terminal-content" id="terminal-content-area"></div>
       </div>
 
       <div id="canvas-loading" class="canvas-loading hidden">
