@@ -23,20 +23,22 @@ graph TD
     subgraph Frontend [Client-Side JS & HTML]
         UI[Interactive UI / Controls]
         Vis[Vis.js Canvas Editor]
-        WS[WebSocket Manager]
+        WS[Tabbed WebSocket Sessions]
     end
 
     subgraph Backend [FastAPI Server]
         Main[app.main - Routing & State]
         Engine[app.discovery - BFS Engine]
-        SSH[SSH Proxy / Paramiko]
+        SSH[SSH Proxy / Netmiko & Paramiko]
+        Mock[Cisco Mock CLI Simulator]
     end
 
     UI -->|JSON/YAML Upload| Main
     UI -->|Seed IP & Credentials| Engine
-    Engine -->|SSH/TextFSM| Router[Simulated Router / Network]
-    WS <-->|Interactive Shell / Output| SSH
-    SSH <-->|PTY Channel| Router
+    Engine -->|SSH/TextFSM| Router[Real Router / Network]
+    WS <-->|WS: Real SSH Session| SSH
+    WS <-->|WS: Mock CLI Session| Mock
+    SSH <-->|PTY Channel / SSH| Router
     UI -->|Save Coordinates & Data| Main
 ```
 
@@ -58,7 +60,9 @@ graph TD
       "type": "switch",
       "layer": "core",
       "ip": "10.0.0.1",
-      "platform": "Cisco Catalyst 6509"
+      "platform": "Cisco Catalyst 6509",
+      "x": -150.0,
+      "y": -200.0
     },
     {
       "id": "dist-sw-01",
@@ -66,7 +70,9 @@ graph TD
       "type": "switch",
       "layer": "distribution",
       "ip": "10.0.1.1",
-      "platform": "Cisco Catalyst 4507"
+      "platform": "Cisco Catalyst 4507",
+      "x": 100.0,
+      "y": 50.0
     }
   ],
   "links": [
