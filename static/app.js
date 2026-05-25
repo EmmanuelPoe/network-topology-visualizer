@@ -1463,6 +1463,8 @@ let terminalMode = 'mock';
 let terminalHistory = [];
 let terminalHistoryIndex = -1;
 let pathHighlightTimeout = null;
+let activeTraceSource = null;
+let activeTracePath = [];
 
 function adjustViewportForTerminal(animate = true) {
   if (!network) return;
@@ -1581,6 +1583,9 @@ function closeTerminal(adjustViewport = true) {
     terminalSocket = null;
   }
   terminalDeviceId = null;
+  
+  activeTraceSource = null;
+  activeTracePath = [];
 
   // Clear path highlight immediately if console is closed
   if (pathHighlightTimeout) {
@@ -1737,6 +1742,38 @@ function appendTerminalText(text) {
   const out = document.getElementById('terminal-output');
   if (!out) return;
 
+  // Parse traceroute hops in real-time if active
+  if (activeTraceSource && currentTopology) {
+    const lines = text.split(/\r?\n/);
+    lines.forEach(line => {
+      const hopMatch = line.match(/^\s*(\d+)\s+.*?\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/);
+      if (hopMatch) {
+        const hopIp = hopMatch[2];
+        const device = currentTopology.devices.find(d => d.ip === hopIp);
+        if (device && !activeTracePath.includes(device.id)) {
+          // Bridge the gap using BFS pathfinding if there is a gap
+          if (activeTracePath.length > 0) {
+            const lastHopId = activeTracePath[activeTracePath.length - 1];
+            const gapPath = findShortestPath(lastHopId, device.id);
+            if (gapPath && gapPath.length > 1) {
+              // Add all intermediate nodes along the path
+              for (let i = 1; i < gapPath.length; i++) {
+                if (!activeTracePath.includes(gapPath[i])) {
+                  activeTracePath.push(gapPath[i]);
+                }
+              }
+            } else {
+              activeTracePath.push(device.id);
+            }
+          } else {
+            activeTracePath.push(device.id);
+          }
+          highlightExplicitPath(activeTracePath, 'trace');
+        }
+      }
+    });
+  }
+
   // Extract prompt dynamic updates (e.g. hostname> or hostname# or config mode or Username/Password)
   const promptRegex = /([A-Za-z0-9._-]+(?:\([^)]+\))?[>#])\s*$/;
   const loginRegex = /(Username:|Password:)\s*$/i;
@@ -1774,6 +1811,16 @@ document.getElementById('terminal-input').addEventListener('keydown', function (
   if (e.key === 'Enter') {
     const val = this.value;
     
+    const trimmedVal = val.trim().toLowerCase();
+    if (trimmedVal.startsWith('traceroute') || trimmedVal.startsWith('trace')) {
+      activeTraceSource = terminalDeviceId;
+      activeTracePath = [terminalDeviceId];
+      resetGraphHighlight();
+    } else if (trimmedVal.length > 0) {
+      activeTraceSource = null;
+      activeTracePath = [];
+    }
+
     // Add to history if not empty and not identical to last entry
     if (val.trim() && (terminalHistory.length === 0 || terminalHistory[terminalHistory.length - 1] !== val)) {
       terminalHistory.push(val);
@@ -1897,30 +1944,16 @@ function resetGraphHighlight() {
   network.unselectAll();
 }
 
-function highlightPath(sourceId, targetId, highlightType = 'trace') {
-  if (!network || !nodesDataset || !edgesDataset) return;
-  
-  if (pathHighlightTimeout) {
-    clearTimeout(pathHighlightTimeout);
-    pathHighlightTimeout = null;
-  }
-  
-  // Reset graph to default state first to clear any previous traces/highlights
-  resetGraphHighlight();
+function highlightExplicitPath(path, highlightType = 'trace') {
+  if (!network || !nodesDataset || !edgesDataset || !path || path.length < 2) return;
 
   const isPing = highlightType === 'ping';
   const highlightColor = isPing ? '#00d2ff' : '#ff9c3a'; // Cyan for ping, Orange for trace
 
-  const path = findShortestPath(sourceId, targetId);
-  if (!path || path.length < 2) {
-    showToast('No active connection path found between devices', 'warning');
-    return;
-  }
-  
   // Dim all other nodes and edges
   const DIM_NODE = { background: '#161b22', border: '#21262d' };
   const DIM_FONT = { color: '#3d444d' };
-  
+
   const nodeUpdates = nodesDataset.get().map(node => {
     if (path.includes(node.id)) {
       const colors = NODE_COLORS[node._data.type] || NODE_COLORS.switch;
@@ -1943,7 +1976,7 @@ function highlightPath(sourceId, targetId, highlightType = 'trace') {
       shadow: false
     };
   });
-  
+
   const pathEdgeIds = [];
   for (let i = 0; i < path.length - 1; i++) {
     const idx = getEdgeIdBetween(path[i], path[i+1]);
@@ -1951,7 +1984,7 @@ function highlightPath(sourceId, targetId, highlightType = 'trace') {
       pathEdgeIds.push(idx);
     }
   }
-  
+
   const edgeUpdates = edgesDataset.get().map(edge => {
     if (pathEdgeIds.includes(edge.id)) {
       return {
@@ -1970,16 +2003,43 @@ function highlightPath(sourceId, targetId, highlightType = 'trace') {
       shadow: false
     };
   });
-  
+
   nodesDataset.update(nodeUpdates);
   edgesDataset.update(edgeUpdates);
-  
+
   // Pan and zoom to cover the path nodes
   network.fit({
     nodes: path,
     animation: { duration: 600, easingFunction: 'easeInOutQuad' }
   });
+}
+
+function highlightPath(sourceId, targetId, highlightType = 'trace') {
+  if (!network || !nodesDataset || !edgesDataset) return;
   
+  if (pathHighlightTimeout) {
+    clearTimeout(pathHighlightTimeout);
+    pathHighlightTimeout = null;
+  }
+  
+  // Reset graph to default state first to clear any previous traces/highlights
+  resetGraphHighlight();
+
+  let path = null;
+  if (highlightType === 'trace' && activeTracePath && activeTracePath.length > 1) {
+    path = activeTracePath;
+  } else {
+    path = findShortestPath(sourceId, targetId);
+  }
+
+  if (!path || path.length < 2) {
+    showToast('No active connection path found between devices', 'warning');
+    return;
+  }
+
+  highlightExplicitPath(path, highlightType);
+  
+  const isPing = highlightType === 'ping';
   showToast(isPing ? 'Ping path highlighted in cyan' : 'Traceroute path highlighted in orange', 'info');
 }
 

@@ -89,10 +89,10 @@ graph TD
 ## Pathfinding & Highlight Logic
 
 When there are multiple physical paths between a source and target device across the network:
-- **Graph-Theoretic Pathfinding**: The visualizer canvas uses an unweighted **Breadth-First Search (BFS)** algorithm to compute paths.
-- **Shortest Hop Priority**: The path with the fewest number of hops will always be selected and highlighted (pings in cyan, traceroutes in orange).
+- **Graph-Theoretic Pathfinding**: For pings, the visualizer canvas uses an unweighted **Breadth-First Search (BFS)** algorithm to compute paths.
+- **Shortest Hop Priority**: The path with the fewest number of hops will always be selected and highlighted (pings in cyan).
 - **Tie-Breaker**: If multiple redundant paths of equal hop length exist, the path whose connections are listed first in the active topology JSON dataset is chosen.
-- **Real SSH Traces**: In a real SSH session, the console text printed represents the actual routing path traversed by network packets (OSPF/BGP metrics, ECMP). The visual canvas, however, will highlight the shortest unweighted graph-theoretic path connecting the devices.
+- **Real-Time Traceroute Pathfinding**: When performing a `traceroute` or `trace` command in the terminal console, the frontend parses the raw terminal stdout in real-time. Hop IP addresses are matched against the topology devices, and the visual canvas dynamically lights up the true routing path device-by-device (in orange) as the trace outputs print, overriding the default client-side BFS calculation.
 
 ## Quick Start
 
