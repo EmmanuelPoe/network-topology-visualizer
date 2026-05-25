@@ -89,10 +89,12 @@ graph TD
 ## Pathfinding & Highlight Logic
 
 When there are multiple physical paths between a source and target device across the network:
-- **Graph-Theoretic Pathfinding**: For pings, the visualizer canvas uses an unweighted **Breadth-First Search (BFS)** algorithm to compute paths.
-- **Shortest Hop Priority**: The path with the fewest number of hops will always be selected and highlighted (pings in cyan).
+- **Graph-Theoretic Pathfinding**: For successful pings, the visualizer canvas uses an unweighted **Breadth-First Search (BFS)** algorithm to compute and highlight the shortest hop connection path in electric cyan (`#00d2ff`).
+- **Shortest Hop Priority**: The path with the fewest number of hops will always be selected for pings.
 - **Tie-Breaker**: If multiple redundant paths of equal hop length exist, the path whose connections are listed first in the active topology JSON dataset is chosen.
-- **Real-Time Traceroute Pathfinding**: When performing a `traceroute` or `trace` command in the terminal console, the frontend parses the raw terminal stdout in real-time. Hop IP addresses are matched against the topology devices, and the visual canvas dynamically lights up the true routing path device-by-device (in orange) as the trace outputs print, overriding the default client-side BFS calculation.
+- **Real-Time Traceroute Pathfinding**: When performing a `traceroute` or `trace` command in the terminal console, the frontend parses the raw terminal stdout in real-time. Hop IP addresses are matched against topology devices to dynamically light up the true routing path device-by-device in premium orange (`#ff9c3a`), overriding the default client-side BFS calculation.
+- **Unreachable Hop Gap Bridging**: If a traceroute encounters unreachable hops (e.g., `* * *`) or unresolvable IPs, the visualizer automatically performs BFS pathfinding between the last known hop and the next responding hop to gracefully bridge the gap and keep the visual path highlight continuous.
+- **Highlight Persistence & Reset**: Path highlights remain visible on the canvas during node selections and general canvas interactions. All highlights are automatically cleared and returned to their original styling properties when the terminal drawer is closed or a new traceroute/ping starts.
 
 ## Quick Start
 
