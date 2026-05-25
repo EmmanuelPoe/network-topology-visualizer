@@ -134,7 +134,7 @@ function buildEdgeTooltip(l) {
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
-function renderNetwork(data) {
+function renderNetwork(data, isInitialLoad = false) {
   closeTerminal(false);
   currentTopology = data;
   currentLayer = 'all';
@@ -152,15 +152,17 @@ function renderNetwork(data) {
     btn.classList.toggle('active', btn.dataset.layer === 'all');
   });
 
-  // Automatically switch layout mode to 'free' if saved positions are present in the layout file
-  const hasSavedPositions = data.devices && data.devices.some(d => typeof d.x === 'number' && typeof d.y === 'number');
-  if (hasSavedPositions) {
-    currentLayout = 'free';
-  } else {
-    // If layout is server/free and there are no saved positions, we can keep it as is,
-    // otherwise fallback to hierarchical for default layouts.
-    if (currentLayout !== 'free' && currentLayout !== 'server') {
-      currentLayout = 'hierarchical';
+  if (isInitialLoad) {
+    // Automatically switch layout mode to 'free' if saved positions are present in the layout file
+    const hasSavedPositions = data.devices && data.devices.some(d => typeof d.x === 'number' && typeof d.y === 'number');
+    if (hasSavedPositions) {
+      currentLayout = 'free';
+    } else {
+      // If layout is server/free and there are no saved positions, we can keep it as is,
+      // otherwise fallback to hierarchical for default layouts.
+      if (currentLayout !== 'free' && currentLayout !== 'server') {
+        currentLayout = 'hierarchical';
+      }
     }
   }
 
@@ -757,7 +759,7 @@ async function loadServerLayout(filename) {
       return;
     }
     const data = await resp.json();
-    renderNetwork(data);
+    renderNetwork(data, true);
     showToast(`Layout loaded successfully`, 'success');
     
     const isCustom = filename !== 'topology.json';
@@ -795,7 +797,7 @@ async function uploadTopology(event) {
       showToast('Upload error: ' + (err.detail || resp.statusText), 'error');
       return;
     }
-    renderNetwork(await resp.json());
+    renderNetwork(await resp.json(), true);
     showToast(`Loaded: ${file.name}`, 'success');
   } catch (e) {
     showToast('Network error during upload', 'error');
