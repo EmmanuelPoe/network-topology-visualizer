@@ -11,6 +11,7 @@ let nodesDataset = null;
 let edgesDataset = null;
 let isEditingMode = false;
 let hasDraggedNode = false;
+let currentNodeSize = 24;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,7 +63,7 @@ function buildGraph(data) {
       font: { color: colors.font, size: 11, face: 'Courier New' },
       shape: 'image',
       image: icon,
-      size: 24,
+      size: currentNodeSize,
       borderWidth: 1,
       shadow: {
         enabled: true,
@@ -167,9 +168,17 @@ function renderNetwork(data, isInitialLoad = false) {
   }
 
   // Update layout control active states
-  document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.layout === currentLayout);
-  });
+  updateLayoutToggleUI(currentLayout);
+
+  const zoomSlider = document.getElementById('zoom-slider');
+  if (zoomSlider) { zoomSlider.value = 1.0; }
+  const zoomVal = document.getElementById('zoom-val');
+  if (zoomVal) { zoomVal.textContent = '100%'; }
+
+  const sizeSlider = document.getElementById('nodesize-slider');
+  if (sizeSlider) { sizeSlider.value = currentNodeSize; }
+  const sizeVal = document.getElementById('nodesize-val');
+  if (sizeVal) { sizeVal.textContent = currentNodeSize + 'px'; }
 
   const { nodes, edges } = buildGraph(data);
 
@@ -190,6 +199,18 @@ function renderNetwork(data, isInitialLoad = false) {
       showEdgeDetail(edge._data);
     } else {
       resetDetailPanel();
+    }
+  });
+
+  network.on('zoom', () => {
+    const scale = network.getScale();
+    const slider = document.getElementById('zoom-slider');
+    if (slider) {
+      slider.value = scale;
+    }
+    const zoomVal = document.getElementById('zoom-val');
+    if (zoomVal) {
+      zoomVal.textContent = Math.round(scale * 100) + '%';
     }
   });
 
@@ -321,13 +342,53 @@ function getOptions() {
 }
 
 // ---------------------------------------------------------------------------
-// Layout toggle
+// Layout toggle and Sliders
 // ---------------------------------------------------------------------------
+function updateLayoutToggleUI(layout) {
+  const toggle = document.getElementById('layout-toggle');
+  if (toggle) {
+    toggle.checked = (layout === 'hierarchical');
+  }
+  const freeLabel = document.getElementById('toggle-free-label');
+  const hierLabel = document.getElementById('toggle-hierarchical-label');
+  if (freeLabel && hierLabel) {
+    freeLabel.classList.toggle('active', layout === 'free');
+    hierLabel.classList.toggle('active', layout === 'hierarchical');
+  }
+}
+
+function onLayoutToggleChanged(checked) {
+  const newLayout = checked ? 'hierarchical' : 'free';
+  setLayout(newLayout);
+}
+
+function onZoomSliderChanged(val) {
+  if (!network) return;
+  network.moveTo({
+    scale: parseFloat(val),
+    animation: false
+  });
+  const zoomVal = document.getElementById('zoom-val');
+  if (zoomVal) {
+    zoomVal.textContent = Math.round(val * 100) + '%';
+  }
+}
+
+function onNodeSizeSliderChanged(val) {
+  currentNodeSize = parseInt(val);
+  const sizeVal = document.getElementById('nodesize-val');
+  if (sizeVal) {
+    sizeVal.textContent = val + 'px';
+  }
+  if (!nodesDataset) return;
+  const ids = nodesDataset.getIds();
+  const updates = ids.map(id => ({ id: id, size: currentNodeSize }));
+  nodesDataset.update(updates);
+}
+
 function setLayout(layout) {
   currentLayout = layout;
-  document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.layout === layout);
-  });
+  updateLayoutToggleUI(layout);
   if (currentTopology) {
     renderNetwork(currentTopology);
   }
@@ -484,24 +545,110 @@ function resetNodeHighlight() {
 // ---------------------------------------------------------------------------
 // Detail panel
 // ---------------------------------------------------------------------------
+function getMockStatsForDevice(deviceId) {
+  let hash = 0;
+  for (let i = 0; i < deviceId.length; i++) {
+    hash = deviceId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  hash = Math.abs(hash);
+  
+  const cpu = (hash % 45) + 5;
+  const mem = (hash % 60) + 20;
+  const uptimeDays = (hash % 120) + 3;
+  const uptimeHours = hash % 24;
+  const uptimeMins = hash % 60;
+  
+  return {
+    cpu,
+    mem,
+    uptime: `${uptimeDays}d ${uptimeHours}h ${uptimeMins}m`
+  };
+}
+
 function showDeviceDetail(device, links) {
   const connectedLinks = links.filter(l => l.source === device.id || l.target === device.id);
+  const stats = getMockStatsForDevice(device.id);
+  
+  const cpuColor = stats.cpu > 70 ? '#f85149' : (stats.cpu > 40 ? '#dbab09' : '#3fb950');
+  const memColor = stats.mem > 70 ? '#f85149' : (stats.mem > 40 ? '#dbab09' : '#3fb950');
+
   document.getElementById('detail-title').textContent = device.label;
   document.getElementById('detail-body').innerHTML = `
-    <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val">${device.type}</div></div>
-    <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val">${device.layer}</div></div>
-    ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val">${device.ip}</div></div>` : ''}
-    ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val">${device.platform}</div></div>` : ''}
-    <div class="detail-row"><div class="detail-key">Connections (${connectedLinks.length})</div>
-      ${connectedLinks.map(l => `
-        <div class="link-item">
-          <div class="link-proto">${l.protocol || 'UNKNOWN'}</div>
-          <div class="link-detail">${l.source === device.id ? '→ ' + l.target : '← ' + l.source}${l.bandwidth ? ' · ' + l.bandwidth : ''}</div>
-          ${l.src_iface || l.dst_iface ? `<div class="link-iface">${l.src_iface || '—'} ↔ ${l.dst_iface || '—'}</div>` : ''}
-        </div>`).join('')}
+    <!-- Status & Info Card -->
+    <div class="detail-card">
+      <div class="detail-row">
+        <div class="detail-key">Status</div>
+        <div class="detail-val">
+          <span class="status-badge online">
+            <span class="status-badge-dot"></span>Online
+          </span>
+        </div>
+      </div>
+      <div class="detail-row"><div class="detail-key">Uptime</div><div class="detail-val font-mono">${stats.uptime}</div></div>
+      <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val uppercase-badge">${device.type}</div></div>
+      <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val uppercase-badge">${device.layer}</div></div>
+      ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val font-mono highlight-text">${device.ip}</div></div>` : ''}
+      ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val font-mono">${device.platform}</div></div>` : ''}
     </div>
-    <button id="open-console-btn" class="ctrl-btn active" style="margin-top: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600;">
-      <span>&#128187;</span> Open Console
+
+    <!-- Health Metrics Card -->
+    <div class="detail-card">
+      <div class="card-title">System Health</div>
+      <div class="metric-row">
+        <div class="metric-header">
+          <span>CPU Load</span>
+          <span class="metric-val" style="color: ${cpuColor}">${stats.cpu}%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" style="width: ${stats.cpu}%; background-color: ${cpuColor}"></div>
+        </div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-header">
+          <span>Memory Usage</span>
+          <span class="metric-val" style="color: ${memColor}">${stats.mem}%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" style="width: ${stats.mem}%; background-color: ${memColor}"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connections Card -->
+    <div class="detail-card">
+      <div class="card-title">Interface Status (${connectedLinks.length})</div>
+      <div class="connections-list">
+        ${connectedLinks.length === 0 ? '<div class="no-connections">No active physical links</div>' : 
+          connectedLinks.map(l => {
+            const isSrc = l.source === device.id;
+            const remoteNodeId = isSrc ? l.target : l.source;
+            const remoteDevice = currentTopology.devices.find(d => d.id === remoteNodeId);
+            const remoteLabel = remoteDevice ? remoteDevice.label : remoteNodeId;
+            const localIface = isSrc ? (l.src_iface || 'Gi0/1') : (l.dst_iface || 'Gi0/1');
+            
+            return `
+              <div class="interface-item">
+                <div class="interface-meta">
+                  <span class="interface-name">${localIface}</span>
+                  <span class="interface-peer">to ${remoteLabel}</span>
+                </div>
+                <div class="interface-stats">
+                  <span class="proto-tag">${l.protocol || 'UP'}</span>
+                  <span class="bw-tag">${l.bandwidth || '1G'}</span>
+                </div>
+              </div>
+            `;
+          }).join('')
+        }
+      </div>
+    </div>
+
+    <button id="open-console-btn" class="console-action-card">
+      <div class="console-action-icon">&#128187;</div>
+      <div class="console-action-text">
+        <div class="console-action-title">Open Terminal Console</div>
+        <div class="console-action-desc">Start interactive CLI session</div>
+      </div>
     </button>
   `;
   setDetailVisible(true);
@@ -666,9 +813,7 @@ function toggleEditMode() {
     // Exiting edit mode
     if (hasDraggedNode && currentLayout === 'hierarchical') {
       currentLayout = 'free';
-      document.querySelectorAll('.ctrl-btn[data-layout]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.layout === 'free');
-      });
+      updateLayoutToggleUI('free');
       showToast('Switched to Free layout to preserve your custom positions.', 'info');
     }
     hasDraggedNode = false;

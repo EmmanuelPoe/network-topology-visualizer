@@ -55,10 +55,35 @@
     <div class="controls">
 
       <div class="control-section">
-        <p class="control-label">Layout</p>
-        <button class="ctrl-btn active" data-layout="hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
-        <button class="ctrl-btn" data-layout="free" onclick="setLayout('free')">Free</button>
+        <p class="control-label">Layout Mode</p>
+        <div class="layout-switch-container">
+          <span class="layout-switch-label" id="toggle-free-label">Free</span>
+          <label class="switch">
+            <input type="checkbox" id="layout-toggle" onchange="onLayoutToggleChanged(this.checked)">
+            <span class="switch-slider"></span>
+          </label>
+          <span class="layout-switch-label active" id="toggle-hierarchical-label">Hierarchical</span>
+        </div>
+      </div>
 
+      <div class="control-section">
+        <div class="slider-container">
+          <div class="slider-header">
+            <span class="control-label" style="margin-bottom: 0;">Zoom Level</span>
+            <span class="slider-val" id="zoom-val">100%</span>
+          </div>
+          <input type="range" id="zoom-slider" min="0.2" max="2.5" step="0.05" value="1.0" class="premium-slider" oninput="onZoomSliderChanged(this.value)">
+        </div>
+      </div>
+
+      <div class="control-section">
+        <div class="slider-container">
+          <div class="slider-header">
+            <span class="control-label" style="margin-bottom: 0;">Node Size</span>
+            <span class="slider-val" id="nodesize-val">24px</span>
+          </div>
+          <input type="range" id="nodesize-slider" min="16" max="48" step="1" value="24" class="premium-slider" oninput="onNodeSizeSliderChanged(this.value)">
+        </div>
       </div>
 
       <div class="control-section">

@@ -874,3 +874,412 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   background: transparent;
 }
 
+/* ============================================================
+   Layout Mode Switcher & Sliders Styling
+   ============================================================ */
+
+/* Custom Layout Switch Container */
+.layout-switch-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 5px;
+}
+
+.layout-switch-label {
+  font-size: 0.78rem;
+  color: #8b949e;
+  transition: color 0.2s, font-weight 0.2s;
+  user-select: none;
+}
+
+.layout-switch-label.active {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+/* Custom Switch structure */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+  margin: 0 8px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #21262d;
+  transition: .3s;
+  border-radius: 22px;
+  border: 1px solid #30363d;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #8b949e;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .switch-slider {
+  background-color: #1f6feb22;
+  border-color: #1f6feb;
+}
+
+input:checked + .switch-slider:before {
+  transform: translateX(22px);
+  background-color: #58a6ff;
+}
+
+/* Range Slider Container */
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 5px;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.slider-val {
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+/* Range input styling */
+.premium-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  outline: none;
+}
+
+.premium-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #58a6ff;
+  cursor: pointer;
+  transition: transform 0.1s, background-color 0.1s;
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.4);
+  border: none;
+}
+
+.premium-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  background: #79c0ff;
+}
+
+.premium-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #58a6ff;
+  cursor: pointer;
+  transition: transform 0.1s, background-color 0.1s;
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.4);
+  border: none;
+}
+
+.premium-slider::-moz-range-thumb:hover {
+  transform: scale(1.25);
+  background: #79c0ff;
+}
+
+/* ============================================================
+   Detailed Device Properties Sidebar Styling
+   ============================================================ */
+.detail-card {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b949e;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.detail-key {
+  color: #8b949e;
+}
+
+.detail-val {
+  color: #c9d1d9;
+  font-weight: 500;
+}
+
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+}
+
+.highlight-text {
+  color: #58a6ff;
+}
+
+.uppercase-badge {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #c9d1d9;
+  font-weight: 600;
+}
+
+/* Online status badge */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 12px;
+}
+
+.status-badge.online {
+  background: rgba(63, 185, 80, 0.1);
+  color: #56d364;
+  border: 1px solid rgba(63, 185, 80, 0.2);
+}
+
+.status-badge-dot {
+  width: 7px;
+  height: 7px;
+  background-color: #3fb950;
+  border-radius: 50%;
+  display: inline-block;
+  animation: pulse-dot 1.8s infinite;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+}
+
+/* Health Metrics */
+.metric-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.metric-row:last-child {
+  margin-bottom: 0;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: #c9d1d9;
+}
+
+.metric-val {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease-out;
+}
+
+/* Connections Styling */
+.connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.no-connections {
+  font-size: 0.78rem;
+  color: #8b949e;
+  font-style: italic;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.interface-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+}
+
+.interface-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.interface-name {
+  font-size: 0.78rem;
+  font-weight: bold;
+  color: #c9d1d9;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, monospace;
+}
+
+.interface-peer {
+  font-size: 0.68rem;
+  color: #8b949e;
+}
+
+.interface-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.proto-tag {
+  font-size: 0.62rem;
+  background: rgba(88, 166, 255, 0.1);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: bold;
+}
+
+.bw-tag {
+  font-size: 0.62rem;
+  background: #21262d;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Console Action Card Button */
+.console-action-card {
+  width: 100%;
+  background: #1f6feb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  margin-top: 8px;
+  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.15);
+}
+
+.console-action-card:hover {
+  background: #388bfd;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(31, 111, 235, 0.25);
+}
+
+.console-action-card:active {
+  transform: translateY(1px);
+}
+
+.console-action-icon {
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.console-action-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.console-action-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.console-action-desc {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
