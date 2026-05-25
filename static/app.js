@@ -558,32 +558,8 @@ function resetNodeHighlight() {
 // ---------------------------------------------------------------------------
 // Detail panel
 // ---------------------------------------------------------------------------
-function getMockStatsForDevice(deviceId) {
-  let hash = 0;
-  for (let i = 0; i < deviceId.length; i++) {
-    hash = deviceId.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  hash = Math.abs(hash);
-  
-  const cpu = (hash % 45) + 5;
-  const mem = (hash % 60) + 20;
-  const uptimeDays = (hash % 120) + 3;
-  const uptimeHours = hash % 24;
-  const uptimeMins = hash % 60;
-  
-  return {
-    cpu,
-    mem,
-    uptime: `${uptimeDays}d ${uptimeHours}h ${uptimeMins}m`
-  };
-}
-
 function showDeviceDetail(device, links) {
   const connectedLinks = links.filter(l => l.source === device.id || l.target === device.id);
-  const stats = getMockStatsForDevice(device.id);
-  
-  const cpuColor = stats.cpu > 70 ? '#f85149' : (stats.cpu > 40 ? '#dbab09' : '#3fb950');
-  const memColor = stats.mem > 70 ? '#f85149' : (stats.mem > 40 ? '#dbab09' : '#3fb950');
 
   document.getElementById('detail-title').textContent = device.label;
   document.getElementById('detail-body').innerHTML = `
@@ -597,34 +573,10 @@ function showDeviceDetail(device, links) {
           </span>
         </div>
       </div>
-      <div class="detail-row"><div class="detail-key">Uptime</div><div class="detail-val font-mono">${stats.uptime}</div></div>
       <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val uppercase-badge">${device.type}</div></div>
       <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val uppercase-badge">${device.layer}</div></div>
       ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val font-mono highlight-text">${device.ip}</div></div>` : ''}
       ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val font-mono">${device.platform}</div></div>` : ''}
-    </div>
-
-    <!-- Health Metrics Card -->
-    <div class="detail-card">
-      <div class="card-title">System Health</div>
-      <div class="metric-row">
-        <div class="metric-header">
-          <span>CPU Load</span>
-          <span class="metric-val" style="color: ${cpuColor}">${stats.cpu}%</span>
-        </div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill" style="width: ${stats.cpu}%; background-color: ${cpuColor}"></div>
-        </div>
-      </div>
-      <div class="metric-row">
-        <div class="metric-header">
-          <span>Memory Usage</span>
-          <span class="metric-val" style="color: ${memColor}">${stats.mem}%</span>
-        </div>
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill" style="width: ${stats.mem}%; background-color: ${memColor}"></div>
-        </div>
-      </div>
     </div>
 
     <!-- Connections Card -->
