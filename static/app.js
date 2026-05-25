@@ -194,6 +194,10 @@ function renderNetwork(data, isInitialLoad = false) {
   const container = document.getElementById('network-container');
   if (network) network.destroy();
   network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, getOptions());
+  window.network = network;
+  window.nodesDataset = nodesDataset;
+  window.currentTopology = currentTopology;
+  window.showDeviceDetail = showDeviceDetail;
 
   network.on('click', params => {
     hideContextMenu();
