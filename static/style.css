@@ -878,79 +878,58 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
    Layout Mode Switcher & Sliders Styling
    ============================================================ */
 
-/* Custom Layout Switch Container */
-.layout-switch-container {
+/* Custom Sliding Segmented Layout Control */
+.segmented-control {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   background: #0d1117;
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 2px;
   margin-top: 5px;
+  height: 34px;
+  box-sizing: border-box;
 }
 
-.layout-switch-label {
-  font-size: 0.78rem;
+.segmented-btn {
+  position: relative;
+  flex: 1;
+  background: transparent;
+  border: none;
   color: #8b949e;
-  transition: color 0.2s, font-weight 0.2s;
-  user-select: none;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 2;
+  transition: color 0.2s;
+  text-align: center;
+  outline: none;
+  height: 100%;
+  border-radius: 6px;
+  margin: 0;
+  padding: 0;
 }
 
-.layout-switch-label.active {
-  color: #58a6ff;
+.segmented-btn.active {
+  color: #ffffff;
   font-weight: 600;
 }
 
-/* Custom Switch structure */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 22px;
-  margin: 0 8px;
-  flex-shrink: 0;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.switch-slider {
+.segmented-slider {
   position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #21262d;
-  transition: .3s;
-  border-radius: 22px;
-  border: 1px solid #30363d;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  background: #1f6feb;
+  border-radius: 6px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
 }
 
-.switch-slider:before {
-  position: absolute;
-  content: "";
-  height: 14px;
-  width: 14px;
-  left: 3px;
-  bottom: 3px;
-  background-color: #8b949e;
-  transition: .3s;
-  border-radius: 50%;
-}
-
-input:checked + .switch-slider {
-  background-color: #1f6feb22;
-  border-color: #1f6feb;
-}
-
-input:checked + .switch-slider:before {
-  transform: translateX(22px);
-  background-color: #58a6ff;
+/* Slide position for Hierarchical */
+.segmented-control.hierarchical-active .segmented-slider {
+  transform: translateX(100%);
 }
 
 /* Range Slider Container */

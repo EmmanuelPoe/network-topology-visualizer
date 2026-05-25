@@ -171,12 +171,18 @@ function renderNetwork(data, isInitialLoad = false) {
   updateLayoutToggleUI(currentLayout);
 
   const zoomSlider = document.getElementById('zoom-slider');
-  if (zoomSlider) { zoomSlider.value = 1.0; }
+  if (zoomSlider) {
+    zoomSlider.value = 1.0;
+    updateSliderTrackFill('zoom-slider', 1.0);
+  }
   const zoomVal = document.getElementById('zoom-val');
   if (zoomVal) { zoomVal.textContent = '100%'; }
 
   const sizeSlider = document.getElementById('nodesize-slider');
-  if (sizeSlider) { sizeSlider.value = currentNodeSize; }
+  if (sizeSlider) {
+    sizeSlider.value = currentNodeSize;
+    updateSliderTrackFill('nodesize-slider', currentNodeSize);
+  }
   const sizeVal = document.getElementById('nodesize-val');
   if (sizeVal) { sizeVal.textContent = currentNodeSize + 'px'; }
 
@@ -207,6 +213,7 @@ function renderNetwork(data, isInitialLoad = false) {
     const slider = document.getElementById('zoom-slider');
     if (slider) {
       slider.value = scale;
+      updateSliderTrackFill('zoom-slider', scale);
     }
     const zoomVal = document.getElementById('zoom-val');
     if (zoomVal) {
@@ -344,22 +351,26 @@ function getOptions() {
 // ---------------------------------------------------------------------------
 // Layout toggle and Sliders
 // ---------------------------------------------------------------------------
-function updateLayoutToggleUI(layout) {
-  const toggle = document.getElementById('layout-toggle');
-  if (toggle) {
-    toggle.checked = (layout === 'hierarchical');
-  }
-  const freeLabel = document.getElementById('toggle-free-label');
-  const hierLabel = document.getElementById('toggle-hierarchical-label');
-  if (freeLabel && hierLabel) {
-    freeLabel.classList.toggle('active', layout === 'free');
-    hierLabel.classList.toggle('active', layout === 'hierarchical');
-  }
+function updateSliderTrackFill(sliderId, val) {
+  const slider = document.getElementById(sliderId);
+  if (!slider) return;
+  const min = parseFloat(slider.min) || 0;
+  const max = parseFloat(slider.max) || 100;
+  const percentage = (val - min) / (max - min) * 100;
+  slider.style.background = `linear-gradient(to right, #58a6ff 0%, #58a6ff ${percentage}%, #21262d ${percentage}%, #21262d 100%)`;
 }
 
-function onLayoutToggleChanged(checked) {
-  const newLayout = checked ? 'hierarchical' : 'free';
-  setLayout(newLayout);
+function updateLayoutToggleUI(layout) {
+  const container = document.getElementById('layout-segmented-control');
+  if (container) {
+    container.classList.toggle('hierarchical-active', layout === 'hierarchical');
+  }
+  const btnFree = document.getElementById('btn-layout-free');
+  const btnHier = document.getElementById('btn-layout-hierarchical');
+  if (btnFree && btnHier) {
+    btnFree.classList.toggle('active', layout === 'free');
+    btnHier.classList.toggle('active', layout === 'hierarchical');
+  }
 }
 
 function onZoomSliderChanged(val) {
@@ -372,6 +383,7 @@ function onZoomSliderChanged(val) {
   if (zoomVal) {
     zoomVal.textContent = Math.round(val * 100) + '%';
   }
+  updateSliderTrackFill('zoom-slider', val);
 }
 
 function onNodeSizeSliderChanged(val) {
@@ -384,6 +396,7 @@ function onNodeSizeSliderChanged(val) {
   const ids = nodesDataset.getIds();
   const updates = ids.map(id => ({ id: id, size: currentNodeSize }));
   nodesDataset.update(updates);
+  updateSliderTrackFill('nodesize-slider', val);
 }
 
 function setLayout(layout) {

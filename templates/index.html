@@ -56,13 +56,10 @@
 
       <div class="control-section">
         <p class="control-label">Layout Mode</p>
-        <div class="layout-switch-container">
-          <span class="layout-switch-label" id="toggle-free-label">Free</span>
-          <label class="switch">
-            <input type="checkbox" id="layout-toggle" onchange="onLayoutToggleChanged(this.checked)">
-            <span class="switch-slider"></span>
-          </label>
-          <span class="layout-switch-label active" id="toggle-hierarchical-label">Hierarchical</span>
+        <div class="segmented-control" id="layout-segmented-control">
+          <div class="segmented-slider"></div>
+          <button class="segmented-btn" id="btn-layout-free" onclick="setLayout('free')">Free</button>
+          <button class="segmented-btn active" id="btn-layout-hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
         </div>
       </div>
 
