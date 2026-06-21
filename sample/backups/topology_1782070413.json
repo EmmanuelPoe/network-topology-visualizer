@@ -7,7 +7,7 @@
       "layer": "core",
       "ip": "10.0.0.1",
       "platform": null,
-      "config": "hostname Core-1-drifted\n!",
+      "config": "hostname Core-1\n!",
       "interfaces": null,
       "x": null,
       "y": null

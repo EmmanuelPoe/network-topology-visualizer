@@ -30,14 +30,15 @@
         <button class="action-btn" onclick="clearLayout()">&#10010; New</button>
         <button id="btn-edit-toggle" class="action-btn" onclick="toggleEditMode()" title="Toggle editing network diagram">&#9998; Edit Layout</button>
         <label class="upload-btn" id="upload-label">
-          &#128194; Upload JSON/YAML
-          <input type="file" id="file-upload" accept=".json,.yaml,.yml" onchange="uploadTopology(event)" hidden>
+          &#128194; Import JSON/YAML/ZIP Configs
+          <input type="file" id="file-upload" accept=".json,.yaml,.yml,.zip" onchange="uploadTopology(event)" hidden>
         </label>
         <button class="action-btn" onclick="openDiscoverModal()" title="Discover Network Topology">&#128269; Discover</button>
         <select id="select-server-layout" class="action-btn" onchange="loadServerLayout(this.value)" style="height: 31px; padding: 4px 10px; cursor: pointer; outline: none; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;">
           <option value="">-- Load Layout --</option>
         </select>
         <button class="action-btn delete-btn" onclick="deleteCurrentLayout()" id="btn-delete-layout" disabled title="Delete selected layout from server">&#10006; Delete</button>
+        <button class="action-btn" onclick="initTimeline()" id="btn-timeline" title="View historical backups timeline">&#128338; Timeline</button>
         <button class="action-btn export-btn" onclick="renameCurrentLayout()" id="btn-rename-layout" disabled title="Rename selected layout">&#9998; Rename</button>
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
@@ -110,6 +111,19 @@
       </div>
 
       <div class="control-section">
+        <p class="control-label">Logical Overlays</p>
+        <select id="select-overlay" class="premium-select" onchange="setOverlayView(this.value)" style="width: 100%; box-sizing: border-box; height: 32px; padding: 4px 10px; cursor: pointer; outline: none; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;">
+          <option value="physical">Physical View (Default)</option>
+          <option value="vlan-10">VLAN 10 (Access/AP)</option>
+          <option value="vlan-20">VLAN 20 (User)</option>
+          <option value="vlan-30">VLAN 30 (Servers)</option>
+          <option value="vlan-all">VLAN Overlay (Color-coded)</option>
+          <option value="routing-ospf">OSPF Neighbors</option>
+          <option value="routing-bgp">BGP Neighbors</option>
+        </select>
+      </div>
+
+      <div class="control-section">
         <p class="control-label">Legend</p>
         <div class="legend-item"><span class="legend-dot router"></span>Router</div>
         <div class="legend-item"><span class="legend-dot switch"></span>Switch</div>
@@ -127,9 +141,23 @@
         <p class="control-label">Stats</p>
         <div id="stats" class="stats">No topology loaded</div>
       </div>
+
+      <div class="control-section">
+        <p class="control-label">Diagnostics</p>
+        <div id="diagnostics-summary" class="stats">No topology loaded</div>
+      </div>
     </div>
 
     <div id="network-wrapper" style="position: relative; flex: 1; display: flex; flex-direction: column;">
+      <!-- Timeline Snapshot Bar -->
+      <div id="timeline-container" class="timeline-container hidden" style="padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 16px;">
+        <span class="control-label" style="margin-bottom: 0; white-space: nowrap; font-size: 0.8rem; font-weight: 600; color: #ff9c3a;">Topology Timeline</span>
+        <button onclick="toggleTimelineMode()" class="ctrl-btn active" id="btn-timeline-toggle" style="width: auto; margin: 0; padding: 4px 10px; font-size: 0.75rem;">Compare Mode</button>
+        <input type="range" id="timeline-slider" min="0" max="0" value="0" step="1" style="flex: 1; cursor: pointer;" oninput="onTimelineSliderInput(this.value)">
+        <span id="timeline-date-label" style="font-family: monospace; font-size: 0.75rem; color: #c9d1d9; white-space: nowrap; min-width: 150px;">Live View</span>
+        <button onclick="exitTimelineMode()" class="ctrl-btn" style="width: auto; margin: 0; padding: 4px 10px; font-size: 0.75rem;">Exit</button>
+      </div>
+
       <div id="network-container" style="flex: 1;"></div>
       
       <!-- Terminal Drawer -->
@@ -155,7 +183,8 @@
 
       <div id="canvas-loading" class="canvas-loading hidden">
         <div class="spinner"></div>
-        <p>Loading topology…</p>
+        <p id="canvas-loading-text">Loading topology…</p>
+        <div id="discovery-log-container" style="display: none; width: 80%; max-width: 600px; max-height: 200px; overflow-y: auto; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-top: 16px; font-family: monospace; font-size: 0.8rem; text-align: left; color: #8b949e; white-space: pre-wrap;"></div>
       </div>
     </div>
 
@@ -163,6 +192,9 @@
       <div class="detail-empty" id="detail-empty">
         <div class="detail-empty-icon">&#128246;</div>
         <p>Click a device or<br>link to inspect it</p>
+        <p class="hint" style="font-size: 0.72rem; color: #8b949e; margin-top: 16px; line-height: 1.4; border-top: 1px solid #21262d; padding-top: 12px; width: 100%; text-align: center;">
+          Tip: Hold <b>Ctrl / Cmd</b> to select multiple devices for bulk CLI execution.
+        </p>
       </div>
       <div id="detail-content" class="hidden">
         <h3 id="detail-title"></h3>
@@ -173,45 +205,58 @@
 
   <!-- Node Editor Modal -->
   <div id="node-modal" class="modal-overlay hidden">
-    <div class="modal">
-      <h3 id="node-modal-title">Edit Node</h3>
-      <div class="form-group">
-        <label for="node-id" class="hidden">ID</label>
-        <input type="text" id="node-id" disabled hidden>
+    <div class="modal" style="width: 520px; max-width: 95vw; display: flex; flex-direction: column; max-height: 90vh; padding: 20px;">
+      <h3 id="node-modal-title" style="margin-bottom: 12px; flex-shrink: 0;">Edit Node</h3>
+      <div class="modal-scroll-area" style="flex: 1; overflow-y: auto; padding-right: 4px; margin-bottom: 15px;">
+        <div class="form-group">
+          <label for="node-id" class="hidden">ID</label>
+          <input type="text" id="node-id" disabled hidden>
+        </div>
+        <div class="form-group">
+          <label for="node-label">Label (Name)</label>
+          <input type="text" id="node-label" placeholder="e.g. Core-SW-01">
+        </div>
+        <div class="form-group">
+          <label for="node-type">Type</label>
+          <select id="node-type">
+            <option value="switch">Switch</option>
+            <option value="router">Router</option>
+            <option value="firewall">Firewall</option>
+            <option value="wireless">Wireless / AP</option>
+            <option value="cloud">Cloud / Internet</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="node-layer">Layer</label>
+          <select id="node-layer">
+            <option value="core">Core</option>
+            <option value="distribution">Distribution</option>
+            <option value="access">Access</option>
+            <option value="edge">Edge</option>
+            <option value="internet">Internet</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="node-ip">IP Address (Management)</label>
+          <input type="text" id="node-ip" placeholder="e.g. 10.0.0.1">
+        </div>
+        <div class="form-group">
+          <label for="node-platform">Platform</label>
+          <input type="text" id="node-platform" placeholder="e.g. Cisco Nexus 9k">
+        </div>
+        
+        <!-- Interfaces List Section -->
+        <div class="form-group" style="margin-top: 20px; border-top: 1px solid #30363d; padding-top: 15px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <label style="font-weight: 600; color: #58a6ff; margin-bottom: 0;">Device Interfaces</label>
+            <button type="button" class="ctrl-btn active" id="btn-add-interface" style="width: auto; padding: 3px 8px; font-size: 0.72rem; margin: 0;">+ Add Interface</button>
+          </div>
+          <div id="modal-interfaces-list" style="display: flex; flex-direction: column; gap: 8px;">
+            <!-- Dynamically populated interface rows -->
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <label for="node-label">Label (Name)</label>
-        <input type="text" id="node-label" placeholder="e.g. Core-SW-01">
-      </div>
-      <div class="form-group">
-        <label for="node-type">Type</label>
-        <select id="node-type">
-          <option value="switch">Switch</option>
-          <option value="router">Router</option>
-          <option value="firewall">Firewall</option>
-          <option value="wireless">Wireless / AP</option>
-          <option value="cloud">Cloud / Internet</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="node-layer">Layer</label>
-        <select id="node-layer">
-          <option value="core">Core</option>
-          <option value="distribution">Distribution</option>
-          <option value="access">Access</option>
-          <option value="edge">Edge</option>
-          <option value="internet">Internet</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="node-ip">IP Address</label>
-        <input type="text" id="node-ip" placeholder="e.g. 10.0.0.1">
-      </div>
-      <div class="form-group">
-        <label for="node-platform">Platform</label>
-        <input type="text" id="node-platform" placeholder="e.g. Cisco Nexus 9k">
-      </div>
-      <div class="modal-actions">
+      <div class="modal-actions" style="flex-shrink: 0; margin-top: 0; padding-top: 10px; border-top: 1px solid #30363d;">
         <button id="node-cancel" class="ctrl-btn">Cancel</button>
         <button id="node-save" class="ctrl-btn active">Save</button>
       </div>
@@ -287,6 +332,17 @@
       <div class="modal-actions">
         <button id="discover-cancel" class="ctrl-btn" onclick="closeDiscoverModal()">Cancel</button>
         <button id="discover-save" class="ctrl-btn active" onclick="runDiscovery()">Start Discovery</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config Diff Modal -->
+  <div id="config-diff-modal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; width: 90%;">
+      <h3 id="config-diff-title">Configuration Drift Diff</h3>
+      <div id="config-diff-body" style="font-family: monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; padding: 12px; border: 1px solid #30363d; border-radius: 6px; overflow-x: auto; max-height: 400px; white-space: pre-wrap; margin-top: 12px;"></div>
+      <div class="modal-actions" style="margin-top: 16px;">
+        <button onclick="closeConfigDiffModal()" class="ctrl-btn active">Close</button>
       </div>
     </div>
   </div>

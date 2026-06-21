@@ -8,15 +8,30 @@ logger = logging.getLogger(__name__)
 
 class DiscoveryEngine:
     def __init__(
-        self, seed_ip: str, username: str, password: str, platform: str, max_depth: int
+        self,
+        seed_ip: str,
+        username: str,
+        password: str,
+        platform: str,
+        max_depth: int,
+        log_callback=None,
     ):
         self.seed_ip = seed_ip
         self.username = username
         self.password = password
         self.platform = platform
         self.max_depth = max_depth
+        self.log_callback = log_callback
         self.devices = {}
         self.links = []
+
+    def _log(self, msg: str):
+        logger.info(msg)
+        if self.log_callback:
+            try:
+                self.log_callback(msg)
+            except Exception:
+                pass
 
     def discover(self) -> Dict[str, List[Any]]:
         """Override this method to implement discovery."""
@@ -31,11 +46,13 @@ class MockDiscoveryEngine(DiscoveryEngine):
 
     def discover(self) -> Dict[str, List[Any]]:
         # Simulate network delay
-        time.sleep(2)
+        self._log(f"Connecting to seed device {self.seed_ip}...")
+        time.sleep(0.5)
 
         # Hardcoded mock topology
         # Assuming seed_ip is the core switch
         core_id = f"core-{self.seed_ip.replace('.', '-')}"
+        self._log(f"Discovered device {core_id} (Core Switch) at {self.seed_ip}")
 
         self.devices[core_id] = {
             "id": core_id,
@@ -47,9 +64,14 @@ class MockDiscoveryEngine(DiscoveryEngine):
         }
 
         if self.max_depth > 0:
+            self._log(f"Retrieving neighbors for core switch {core_id}...")
+            time.sleep(0.5)
             # Add distribution switches
             for i in range(1, 3):
                 dist_id = f"dist-{i}"
+                self._log(
+                    f"Discovered neighbor {dist_id} on Core interface TenGig1/0/{i}"
+                )
                 self.devices[dist_id] = {
                     "id": dist_id,
                     "label": f"Distribution {i}",
@@ -63,14 +85,22 @@ class MockDiscoveryEngine(DiscoveryEngine):
                         "target": dist_id,
                         "src_iface": f"TenGig1/0/{i}",
                         "dst_iface": "TenGig1/0/1",
-                        "protocol": "LLDP",
+                        "protocol": "OSPF",
+                        "vlan": "Trunk",
                     }
                 )
 
                 if self.max_depth > 1:
+                    self._log(
+                        f"Connecting to distribution switch {dist_id} and scanning neighbors..."
+                    )
+                    time.sleep(0.3)
                     # Add access switches
                     for j in range(1, 4):
                         access_id = f"access-{i}-{j}"
+                        self._log(
+                            f"Discovered neighbor {access_id} on {dist_id} interface Gig1/0/{j}"
+                        )
                         self.devices[access_id] = {
                             "id": access_id,
                             "label": f"Access {i}-{j}",
@@ -84,10 +114,12 @@ class MockDiscoveryEngine(DiscoveryEngine):
                                 "target": access_id,
                                 "src_iface": f"Gig1/0/{j}",
                                 "dst_iface": "Gig1/0/1",
-                                "protocol": "LLDP",
+                                "protocol": "STP",
+                                "vlan": str(10 * j),
                             }
                         )
 
+        self._log("Discovery complete! Rendering mock topology...")
         return {"devices": list(self.devices.values()), "links": self.links}
 
 
@@ -155,27 +187,34 @@ class NetmikoDiscoveryEngine(DiscoveryEngine):
         try:
             from netmiko import ConnectHandler
         except ImportError:
-            logger.error("Netmiko is not installed.")
+            self._log("Netmiko is not installed.")
             return {"devices": [], "links": []}
 
         import re
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
 
-        queue = [(self.seed_ip, 0)]
         visited_connections = set()
         visited_hostnames = set()
+        visited_lock = threading.Lock()
+        devices_lock = threading.Lock()
+        links_lock = threading.Lock()
 
-        while queue:
-            ip_str, depth = queue.pop(0)
+        # Create a thread pool with up to 10 workers for concurrent crawling
+        executor = ThreadPoolExecutor(max_workers=10)
+
+        def discover_node(ip_str: str, depth: int):
             host, port = self._parse_address(ip_str)
             if not host:
-                continue
+                return
 
-            conn_key = (host, port)
-            if conn_key in visited_connections:
-                continue
-            visited_connections.add(conn_key)
+            with visited_lock:
+                conn_key = (host, port)
+                if conn_key in visited_connections:
+                    return
+                visited_connections.add(conn_key)
 
-            logger.info(f"Connecting to {host}:{port or 22} at depth {depth}")
+            self._log(f"Connecting to {host}:{port or 22} at depth {depth}")
             device_params = {
                 "device_type": self.platform,
                 "host": host,
@@ -196,30 +235,31 @@ class NetmikoDiscoveryEngine(DiscoveryEngine):
                 if not hostname:
                     hostname = host
 
-                logger.info(f"Connected to device. Sanitize hostname: {hostname}")
+                self._log(f"Connected to device. Sanitize hostname: {hostname}")
 
-                # Check if this hostname was already visited
-                if hostname in visited_hostnames:
-                    logger.info(
-                        f"Hostname {hostname} already visited, skipping neighbors."
-                    )
-                    net_connect.disconnect()
-                    continue
-                visited_hostnames.add(hostname)
+                with visited_lock:
+                    if hostname in visited_hostnames:
+                        self._log(
+                            f"Hostname {hostname} already visited, skipping neighbors."
+                        )
+                        net_connect.disconnect()
+                        return
+                    visited_hostnames.add(hostname)
 
                 # Guess type and layer
                 dev_type = self._guess_device_type(hostname, "")
                 dev_layer = self._guess_device_layer(hostname, depth)
 
                 # Add current device
-                self.devices[hostname] = {
-                    "id": hostname,
-                    "label": hostname,
-                    "type": dev_type,
-                    "layer": dev_layer,
-                    "ip": host,
-                    "platform": self.platform,
-                }
+                with devices_lock:
+                    self.devices[hostname] = {
+                        "id": hostname,
+                        "label": hostname,
+                        "type": dev_type,
+                        "layer": dev_layer,
+                        "ip": host,
+                        "platform": self.platform,
+                    }
 
                 # Define vendor-specific commands
                 platform_cmds = {
@@ -249,28 +289,27 @@ class NetmikoDiscoveryEngine(DiscoveryEngine):
                 neighbors = []
                 proto = "LLDP"
                 try:
-                    logger.info(f"Retrieving LLDP neighbors via command: {lldp_cmd}...")
+                    self._log(f"Retrieving LLDP neighbors via command: {lldp_cmd}...")
                     lldp_out = net_connect.send_command(lldp_cmd, use_textfsm=True)
                     if isinstance(lldp_out, list) and len(lldp_out) > 0:
                         neighbors = lldp_out
                 except Exception as e:
-                    logger.warning(f"Failed to get LLDP neighbors: {e}")
+                    self._log(f"Failed to get LLDP neighbors: {e}")
 
                 # Fallback to CDP neighbors
                 if not neighbors:
                     try:
-                        logger.info(
-                            f"Retrieving CDP neighbors via command: {cdp_cmd}..."
-                        )
+                        self._log(f"Retrieving CDP neighbors via command: {cdp_cmd}...")
                         cdp_out = net_connect.send_command(cdp_cmd, use_textfsm=True)
                         if isinstance(cdp_out, list) and len(cdp_out) > 0:
                             neighbors = cdp_out
                             proto = "CDP"
                     except Exception as e:
-                        logger.warning(f"Failed to get CDP neighbors: {e}")
+                        self._log(f"Failed to get CDP neighbors: {e}")
 
-                logger.info(f"Found {len(neighbors)} neighbors via {proto}")
+                self._log(f"Found {len(neighbors)} neighbors via {proto}")
 
+                futures = []
                 for neigh in neighbors:
                     # Normalize neighbor name across multiple vendor TextFSM templates
                     neigh_name = (
@@ -312,15 +351,16 @@ class NetmikoDiscoveryEngine(DiscoveryEngine):
                     neigh_layer = self._guess_device_layer(neigh_name, depth + 1)
 
                     # Add neighbor device if not already present
-                    if neigh_name not in self.devices:
-                        self.devices[neigh_name] = {
-                            "id": neigh_name,
-                            "label": neigh_name,
-                            "type": neigh_type,
-                            "layer": neigh_layer,
-                            "ip": neigh_ip.split(":")[0] if neigh_ip else None,
-                            "platform": None,
-                        }
+                    with devices_lock:
+                        if neigh_name not in self.devices:
+                            self.devices[neigh_name] = {
+                                "id": neigh_name,
+                                "label": neigh_name,
+                                "type": neigh_type,
+                                "layer": neigh_layer,
+                                "ip": neigh_ip.split(":")[0] if neigh_ip else None,
+                                "platform": None,
+                            }
 
                     # Normalize local/neighbor interfaces
                     local_iface = (
@@ -340,40 +380,56 @@ class NetmikoDiscoveryEngine(DiscoveryEngine):
                     )
 
                     # Deduplicate links
-                    link_exists = False
-                    for lnk in self.links:
-                        if (
-                            lnk["source"] == hostname and lnk["target"] == neigh_name
-                        ) or (
-                            lnk["source"] == neigh_name and lnk["target"] == hostname
-                        ):
-                            link_exists = True
-                            break
-                    if not link_exists:
-                        self.links.append(
-                            {
-                                "source": hostname,
-                                "target": neigh_name,
-                                "src_iface": local_iface,
-                                "dst_iface": neigh_iface,
-                                "protocol": proto,
-                            }
-                        )
+                    with links_lock:
+                        link_exists = False
+                        for lnk in self.links:
+                            if (
+                                lnk["source"] == hostname
+                                and lnk["target"] == neigh_name
+                            ) or (
+                                lnk["source"] == neigh_name
+                                and lnk["target"] == hostname
+                            ):
+                                link_exists = True
+                                break
+                        if not link_exists:
+                            self.links.append(
+                                {
+                                    "source": hostname,
+                                    "target": neigh_name,
+                                    "src_iface": local_iface,
+                                    "dst_iface": neigh_iface,
+                                    "protocol": proto,
+                                }
+                            )
 
                     # Enqueue neighbor if within max_depth
                     if depth < self.max_depth and neigh_ip:
                         n_host, n_port = self._parse_address(neigh_ip)
-                        if (n_host, n_port) not in visited_connections:
-                            queue.append((neigh_ip, depth + 1))
+                        with visited_lock:
+                            unvisited = (n_host, n_port) not in visited_connections
+                        if unvisited:
+                            # Submit to thread pool recursively
+                            futures.append(
+                                executor.submit(discover_node, neigh_ip, depth + 1)
+                            )
 
                 net_connect.disconnect()
 
+                # Wait for recursively spawned threads to complete
+                for f in futures:
+                    f.result()
+
             except Exception as e:
-                logger.error(f"Failed to discover device at {host}:{port or 22}: {e}")
+                self._log(f"Failed to discover device at {host}:{port or 22}: {e}")
                 if net_connect:
                     try:
                         net_connect.disconnect()
                     except Exception:
                         pass
+
+        # Start recursive discovery from seed IP
+        discover_node(self.seed_ip, 0)
+        executor.shutdown(wait=True)
 
         return {"devices": list(self.devices.values()), "links": self.links}

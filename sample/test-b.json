@@ -7,6 +7,7 @@
       "layer": "access",
       "ip": "10.0.0.1",
       "platform": "",
+      "config": null,
       "x": -34.0,
       "y": -77.0
     },
@@ -17,6 +18,7 @@
       "layer": "access",
       "ip": "10.0.0.2",
       "platform": "",
+      "config": null,
       "x": 476.0,
       "y": -74.0
     },
@@ -27,8 +29,9 @@
       "layer": "edge",
       "ip": "10.0.0.255",
       "platform": "",
-      "x": 212.0,
-      "y": -330.0
+      "config": null,
+      "x": 396.0,
+      "y": -361.0
     }
   ],
   "links": [
@@ -37,6 +40,7 @@
       "target": "node-1o5iq1",
       "protocol": "EIGRP",
       "bandwidth": "1G",
+      "vlan": null,
       "src_iface": "G1/1",
       "dst_iface": "G1/1"
     },
@@ -45,6 +49,7 @@
       "target": "2e0d50fc-ec96-41c4-b088-ad481d1fa58d",
       "protocol": "ospf",
       "bandwidth": "1G",
+      "vlan": null,
       "src_iface": "G1/1",
       "dst_iface": "G1/2"
     },
@@ -53,6 +58,7 @@
       "target": "node-1o5iq1",
       "protocol": "OSPF",
       "bandwidth": "1G",
+      "vlan": null,
       "src_iface": "G1/2",
       "dst_iface": "G1/2"
     }

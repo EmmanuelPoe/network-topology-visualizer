@@ -27,6 +27,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from app.discovery import MockDiscoveryEngine, NetmikoDiscoveryEngine
+from app.polling import LivePoller
+from app.path_tracer import trace_path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.main")
@@ -63,6 +65,19 @@ _executor = ThreadPoolExecutor(max_workers=2)
 # ---------------------------------------------------------------------------
 
 
+class DeviceInterface(BaseModel):
+    name: str
+    ip: Optional[str] = None
+    mask: Optional[str] = None
+    vlan_access: Optional[int] = None
+    vlan_trunk: Optional[str] = None
+    vlan_native: Optional[int] = None
+    mtu: Optional[int] = None
+    speed: Optional[str] = None
+    duplex: Optional[str] = None
+    mode: Optional[str] = None
+
+
 class Device(BaseModel):
     id: str
     label: str
@@ -70,6 +85,8 @@ class Device(BaseModel):
     layer: str = "core"
     ip: Optional[str] = None
     platform: Optional[str] = None
+    config: Optional[str] = None
+    interfaces: Optional[list[DeviceInterface]] = None
     x: Optional[float] = None
     y: Optional[float] = None
 
@@ -81,11 +98,19 @@ class Link(BaseModel):
     target: str
     protocol: Optional[str] = None
     bandwidth: Optional[str] = None
+    vlan: Optional[str] = None
     # Accept both naming conventions; normalise to src_iface / dst_iface
     src_iface: Optional[str] = Field(None)
     dst_iface: Optional[str] = Field(None)
     source_interface: Optional[str] = Field(None, exclude=True)
     target_interface: Optional[str] = Field(None, exclude=True)
+
+    # Auditing properties
+    vlan_mismatch: Optional[bool] = None
+    subnet_mismatch: Optional[bool] = None
+    mtu_mismatch: Optional[bool] = None
+    speed_mismatch: Optional[bool] = None
+    warnings: Optional[list[str]] = None
 
     model_config = {"populate_by_name": True}
 
@@ -118,7 +143,10 @@ def parse_topology(raw: dict) -> dict:
         topo = Topology.model_validate(raw)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Validation error: {exc}")
-    return topo.model_dump()
+
+    from app.auditor import audit_topology
+
+    return audit_topology(topo.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +183,41 @@ class ConnectionManager:
             self.disconnect(ws)
         return len(self.active)
 
+    async def broadcast_text(self, message: str) -> None:
+        """Send raw text message to all connected clients."""
+        dead: list[WebSocket] = []
+        for ws in list(self.active):
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
 
 manager = ConnectionManager()
+poller = LivePoller(manager)
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Load default layout into manager.latest_topology on startup to seed the poller
+    try:
+        if SAMPLE_PATH.exists():
+            try:
+                raw = json.loads(SAMPLE_PATH.read_text())
+                manager.latest_topology = parse_topology(raw)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Failed to load sample topology on startup: {e}")
+    poller.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await poller.stop()
+
 
 # ---------------------------------------------------------------------------
 # Auth helper
@@ -206,11 +267,16 @@ async def get_sample() -> JSONResponse:
 async def upload_topology(file: UploadFile = File(...)) -> JSONResponse:
     content = await file.read()
     try:
-        if file.filename.endswith((".yaml", ".yml")):
+        if file.filename.endswith(".zip"):
+            from app.config_parser import ConfigTopologyParser
+
+            parser = ConfigTopologyParser()
+            raw = parser.parse_zip(content)
+        elif file.filename.endswith((".yaml", ".yml")):
             raw = yaml.safe_load(content)
         else:
             raw = json.loads(content)
-    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+    except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Parse error: {exc}")
 
     if not isinstance(raw, dict) or "devices" not in raw or "links" not in raw:
@@ -226,12 +292,16 @@ async def validate_topology(file: UploadFile = File(...)) -> JSONResponse:
     """Dry-run validation without storing anything."""
     content = await file.read()
     try:
-        raw = (
-            yaml.safe_load(content)
-            if file.filename.endswith((".yaml", ".yml"))
-            else json.loads(content)
-        )
-    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+        if file.filename.endswith(".zip"):
+            from app.config_parser import ConfigTopologyParser
+
+            parser = ConfigTopologyParser()
+            raw = parser.parse_zip(content)
+        elif file.filename.endswith((".yaml", ".yml")):
+            raw = yaml.safe_load(content)
+        else:
+            raw = json.loads(content)
+    except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Parse error: {exc}")
     parse_topology(raw)
     return JSONResponse(
@@ -242,16 +312,35 @@ async def validate_topology(file: UploadFile = File(...)) -> JSONResponse:
 @app.post("/api/discover")
 async def discover_topology(req: DiscoverRequest) -> JSONResponse:
     try:
+        loop = asyncio.get_running_loop()
+
+        def log_callback(msg: str):
+            asyncio.run_coroutine_threadsafe(
+                manager.broadcast_text(
+                    json.dumps({"type": "discovery_log", "message": msg})
+                ),
+                loop,
+            )
+
         if req.mock_mode:
             engine = MockDiscoveryEngine(
-                req.seed_ip, req.username, req.password, req.platform, req.max_depth
+                req.seed_ip,
+                req.username,
+                req.password,
+                req.platform,
+                req.max_depth,
+                log_callback=log_callback,
             )
         else:
             engine = NetmikoDiscoveryEngine(
-                req.seed_ip, req.username, req.password, req.platform, req.max_depth
+                req.seed_ip,
+                req.username,
+                req.password,
+                req.platform,
+                req.max_depth,
+                log_callback=log_callback,
             )
 
-        loop = asyncio.get_running_loop()
         raw_topo = await loop.run_in_executor(_executor, engine.discover)
 
         data = parse_topology(raw_topo)
@@ -393,6 +482,16 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
 
         data = req.model_dump()
         save_path.write_text(json.dumps(data, indent=2))
+
+        # Save timestamped backup
+        backup_dir = sample_dir / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        import time
+
+        ts = int(time.time())
+        backup_path = backup_dir / f"topology_{ts}.json"
+        backup_path.write_text(json.dumps(data, indent=2))
+
         manager.latest_topology = data
         await manager.broadcast(data)
         return JSONResponse(
@@ -407,6 +506,329 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save topology: {exc}")
+
+
+class RunbookRequest(BaseModel):
+    device_ids: list[str]
+    command: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    mock_mode: bool = True
+
+
+async def run_mock_command(
+    device_id: str,
+    label: str,
+    ip: str,
+    platform: str,
+    command: str,
+    topology_data: dict,
+) -> str:
+    import random
+
+    await asyncio.sleep(random.uniform(0.3, 0.8))
+
+    # Check if the device is offline in the polling states
+    if poller and device_id in poller.device_states:
+        state = poller.device_states[device_id]
+        if not state.get("online", True):
+            return "\r\n% Connection timed out; remote host not responding (device is offline)\r\n"
+
+    session = MockTerminalSession(device_id, label, ip, platform, topology_data)
+    result = session.handle_command(command)
+    output = result.get("text", "")
+
+    prompt = session.get_prompt()
+    if output.endswith(prompt):
+        output = output[: -len(prompt)]
+    output = output.strip()
+    return output
+
+
+def run_real_ssh_command(
+    device_id: str,
+    ip: str,
+    platform: str,
+    command: str,
+    username: str,
+    password: str,
+) -> str:
+    if not NETMIKO_AVAILABLE:
+        return "Error: Netmiko library is not installed in the environment."
+    if not ip:
+        return "Error: Device IP is required for SSH connection."
+    if not username or not password:
+        return "Error: Username and Password credentials are required for SSH."
+
+    ssh_host = ip
+    ssh_port = 22
+    if ":" in ip:
+        try:
+            ssh_host, port_str = ip.split(":", 1)
+            ssh_port = int(port_str)
+        except ValueError:
+            pass
+
+    conn_params = {
+        "device_type": platform,
+        "host": ssh_host,
+        "port": ssh_port,
+        "username": username,
+        "password": password,
+        "conn_timeout": 5,
+    }
+
+    try:
+        net_connect = ConnectHandler(**conn_params)
+        try:
+            output = net_connect.send_command(command)
+            return output
+        finally:
+            net_connect.disconnect()
+    except Exception as e:
+        return f"SSH connection failed: {str(e)}"
+
+
+@app.post("/api/runbook")
+async def run_runbook(req: RunbookRequest) -> JSONResponse:
+    if manager.latest_topology is not None:
+        topology_data = manager.latest_topology
+    else:
+        try:
+            topology_data = json.loads(SAMPLE_PATH.read_text())
+        except Exception:
+            topology_data = {"devices": [], "links": []}
+
+    outputs = {}
+    tasks = []
+
+    for dev_id in req.device_ids:
+        device = next(
+            (d for d in topology_data.get("devices", []) if d.get("id") == dev_id),
+            None,
+        )
+        if not device:
+            outputs[dev_id] = f"Error: Device {dev_id} not found in topology."
+            continue
+
+        ip = device.get("ip")
+        platform = device.get("platform") or "cisco_ios"
+        label = device.get("label") or dev_id
+
+        is_mock_ip = not ip or ip.startswith("10.99.")
+        is_mock_platform = "mock" in platform.lower()
+        is_mock_id = dev_id.startswith("mock") or "internet" in dev_id.lower()
+
+        use_mock = req.mock_mode or is_mock_ip or is_mock_platform or is_mock_id
+
+        if use_mock:
+            tasks.append(
+                run_mock_command(
+                    dev_id,
+                    label,
+                    ip or "10.0.0.1",
+                    platform,
+                    req.command,
+                    topology_data,
+                )
+            )
+        else:
+            loop = asyncio.get_running_loop()
+            tasks.append(
+                loop.run_in_executor(
+                    _executor,
+                    run_real_ssh_command,
+                    dev_id,
+                    ip,
+                    platform,
+                    req.command,
+                    req.username or "admin",
+                    req.password or "",
+                )
+            )
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    task_idx = 0
+    for dev_id in req.device_ids:
+        device = next(
+            (d for d in topology_data.get("devices", []) if d.get("id") == dev_id),
+            None,
+        )
+        if not device:
+            continue
+        res = results[task_idx]
+        if isinstance(res, Exception):
+            outputs[dev_id] = f"Error during execution: {str(res)}"
+        else:
+            outputs[dev_id] = res
+        task_idx += 1
+
+    return JSONResponse({"outputs": outputs})
+
+
+class PathTraceRequest(BaseModel):
+    source_device_id: str
+    destination_ip: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    mock_mode: bool = True
+
+
+@app.post("/api/path-trace")
+async def run_path_trace(req: PathTraceRequest) -> JSONResponse:
+    if manager.latest_topology is not None:
+        topology_data = manager.latest_topology
+    else:
+        try:
+            topology_data = json.loads(SAMPLE_PATH.read_text())
+        except Exception:
+            topology_data = {"devices": [], "links": []}
+
+    try:
+        hops = await trace_path(
+            topology_data=topology_data,
+            source_id=req.source_device_id,
+            dest_ip=req.destination_ip,
+            username=req.username,
+            password=req.password,
+            mock_mode=req.mock_mode,
+        )
+        return JSONResponse({"hops": hops})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def get_device_mock_config(device_id: str, label: str, ip: str, platform: str) -> str:
+    return f"""!
+hostname {label.replace(" ", "-").lower()}
+!
+interface Loopback0
+ ip address {ip or "10.0.0.1"} 255.255.255.255
+!
+interface GigabitEthernet1/0/1
+ description Uplink
+ duplex auto
+ speed auto
+!
+router ospf 1
+ network 10.0.0.0 0.255.255.255 area 0
+!
+end
+"""
+
+
+@app.get("/api/backups")
+async def list_backups() -> JSONResponse:
+    try:
+        backup_dir = Path(__file__).parent.parent / "sample" / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        backups = []
+        for p in backup_dir.glob("*.json"):
+            name = p.name
+            timestamp_str = name.replace("topology_", "").replace(".json", "")
+            try:
+                ts = int(timestamp_str)
+                backups.append({"timestamp": ts, "filename": name})
+            except ValueError:
+                pass
+
+        backups.sort(key=lambda x: x["timestamp"], reverse=True)
+        return JSONResponse({"backups": backups})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list backups: {exc}")
+
+
+@app.get("/api/backups/diff")
+async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONResponse:
+    import difflib
+
+    try:
+        sample_dir = Path(__file__).parent.parent / "sample"
+        backup_dir = sample_dir / "backups"
+
+        # Resolve p1
+        if (
+            file1 == "topology.json"
+            or "/" not in file1
+            and not file1.startswith("topology_")
+        ):
+            p1 = (sample_dir / file1).resolve()
+            if not p1.is_relative_to(sample_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid file path")
+        else:
+            p1 = (backup_dir / file1).resolve()
+            if not p1.is_relative_to(backup_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid backup file name")
+
+        # Resolve p2
+        if (
+            file2 == "topology.json"
+            or "/" not in file2
+            and not file2.startswith("topology_")
+        ):
+            p2 = (sample_dir / file2).resolve()
+            if not p2.is_relative_to(sample_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid file path")
+        else:
+            p2 = (backup_dir / file2).resolve()
+            if not p2.is_relative_to(backup_dir.resolve()):
+                raise HTTPException(status_code=400, detail="Invalid backup file name")
+
+        if not p1.exists() or not p2.exists():
+            raise HTTPException(status_code=404, detail="Backup file not found")
+
+        topo1 = json.loads(p1.read_text())
+        topo2 = json.loads(p2.read_text())
+
+        dev1 = next(
+            (d for d in topo1.get("devices", []) if d.get("id") == device_id), None
+        )
+        dev2 = next(
+            (d for d in topo2.get("devices", []) if d.get("id") == device_id), None
+        )
+
+        cfg1 = ""
+        if dev1:
+            cfg1 = dev1.get("config") or get_device_mock_config(
+                device_id,
+                dev1.get("label", device_id),
+                dev1.get("ip", ""),
+                dev1.get("platform", ""),
+            )
+
+        cfg2 = ""
+        if dev2:
+            cfg2 = dev2.get("config") or get_device_mock_config(
+                device_id,
+                dev2.get("label", device_id),
+                dev2.get("ip", ""),
+                dev2.get("platform", ""),
+            )
+
+        diff_lines = list(
+            difflib.unified_diff(
+                cfg1.splitlines(),
+                cfg2.splitlines(),
+                fromfile=file1,
+                tofile=file2,
+                lineterm="",
+            )
+        )
+
+        return JSONResponse(
+            {
+                "device_id": device_id,
+                "file1": file1,
+                "file2": file2,
+                "diff": "\n".join(diff_lines),
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

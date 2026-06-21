@@ -12,6 +12,14 @@ let edgesDataset = null;
 let isEditingMode = false;
 let hasDraggedNode = false;
 let currentNodeSize = 24;
+let selectedDeviceId = null;
+let deviceHealthStatuses = {};
+let currentOverlay = 'physical';
+let backupsList = [];
+let isTimelineMode = false;
+let isCompareMode = true;
+let selectedBackupIndex = -1;
+let auditFlashInterval = null;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -54,7 +62,7 @@ function buildGraph(data) {
     return {
       id: d.id,
       label: d.label + (d.ip ? '\n' + d.ip : ''),
-      ...(currentLayout === 'hierarchical' && { level: LAYER_LEVEL[d.layer] || 3 }),
+      ...(currentLayout === 'hierarchical' && !isEditingMode && { level: LAYER_LEVEL[d.layer] || 3 }),
       color: {
         background: colors.background,
         border: colors.border,
@@ -80,20 +88,50 @@ function buildGraph(data) {
     };
   });
 
-  const edges = data.links.map((l, i) => ({
-    id: i,
-    from: l.source,
-    to: l.target,
-    label: l.protocol || '',
-    font: { size: 9, color: '#58a6ff', align: 'middle', strokeWidth: 0 },
-    color: { color: '#30363d', highlight: '#58a6ff' },
-    width: calcEdgeWidth(l.bandwidth),
-    smooth: { type: 'curvedCW', roundness: 0.1 },
-    dashing: false,
-    shadow: false,
-    title: buildEdgeTooltip(l),
-    _data: l,
-  }));
+  const edges = data.links.map((l, i) => {
+    let label = l.protocol || '';
+    let edgeColor = '#30363d';
+    let edgeHighlight = '#58a6ff';
+    let isMismatch = false;
+
+    if (l.vlan_mismatch) {
+      edgeColor = '#ff9f43';
+      edgeHighlight = '#ffa851';
+      isMismatch = true;
+    } else if (l.subnet_mismatch) {
+      edgeColor = '#f85149';
+      edgeHighlight = '#ff7875';
+      isMismatch = true;
+    } else if (l.mtu_mismatch || l.speed_mismatch) {
+      edgeColor = '#ffc107';
+      edgeHighlight = '#ffe066';
+      isMismatch = true;
+    }
+
+    if (l.warnings && l.warnings.length > 0) {
+      const warningTypes = [];
+      if (l.vlan_mismatch) warningTypes.push('VLAN');
+      if (l.subnet_mismatch) warningTypes.push('Subnet');
+      if (l.mtu_mismatch) warningTypes.push('MTU');
+      if (l.speed_mismatch) warningTypes.push('Speed');
+      label = `⚠️ [${warningTypes.join('/')}] ` + label;
+    }
+
+    return {
+      id: i,
+      from: l.source,
+      to: l.target,
+      label: label,
+      font: { size: 9, color: isMismatch ? edgeColor : '#58a6ff', align: 'middle', strokeWidth: 0 },
+      color: { color: edgeColor, highlight: edgeHighlight },
+      width: isMismatch ? 3.0 : calcEdgeWidth(l.bandwidth),
+      smooth: currentLayout === 'free' ? false : { type: 'curvedCW', roundness: 0.1 },
+      dashing: isMismatch ? [5, 5] : false,
+      shadow: false,
+      title: buildEdgeTooltip(l),
+      _data: l,
+    };
+  });
 
   return { nodes, edges };
 }
@@ -120,15 +158,23 @@ function calcEdgeWidth(bw) {
 }
 
 function buildNodeTooltip(d) {
-  return `<b>${d.label}</b><br>Type: ${d.type}<br>Layer: ${d.layer}` +
-    (d.ip ? `<br>IP: ${d.ip}` : '') +
-    (d.platform ? `<br>Platform: ${d.platform}` : '');
+  return `${d.label}` +
+    `\nType: ${d.type}` +
+    `\nLayer: ${d.layer}` +
+    (d.ip ? `\nIP: ${d.ip}` : '') +
+    (d.platform ? `\nPlatform: ${d.platform}` : '');
 }
 
 function buildEdgeTooltip(l) {
-  let t = `Protocol: ${l.protocol || 'N/A'}<br>BW: ${l.bandwidth || 'N/A'}`;
-  if (l.src_iface) t += `<br>Src: ${l.src_iface}`;
-  if (l.dst_iface) t += `<br>Dst: ${l.dst_iface}`;
+  let t = `Protocol: ${l.protocol || 'N/A'}\nBW: ${l.bandwidth || 'N/A'}`;
+  if (l.src_iface) t += `\nSrc: ${l.src_iface}`;
+  if (l.dst_iface) t += `\nDst: ${l.dst_iface}`;
+  if (l.warnings && l.warnings.length > 0) {
+    t += `\n\n⚠️ Diagnostics Mismatch:`;
+    l.warnings.forEach(w => {
+      t += `\n• ${w}`;
+    });
+  }
   return t;
 }
 
@@ -137,6 +183,12 @@ function buildEdgeTooltip(l) {
 // ---------------------------------------------------------------------------
 function renderNetwork(data, isInitialLoad = false) {
   closeTerminal(false);
+  
+  if (auditFlashInterval) {
+    clearInterval(auditFlashInterval);
+    auditFlashInterval = null;
+  }
+
   currentTopology = data;
   currentLayer = 'all';
 
@@ -201,13 +253,19 @@ function renderNetwork(data, isInitialLoad = false) {
 
   network.on('click', params => {
     hideContextMenu();
-    if (params.nodes.length > 0) {
-      const node = nodesDataset.get(params.nodes[0]);
+    if (params.nodes.length > 1) {
+      selectedDeviceId = null;
+      showBulkActionPanel(params.nodes);
+    } else if (params.nodes.length === 1) {
+      selectedDeviceId = params.nodes[0];
+      const node = nodesDataset.get(selectedDeviceId);
       showDeviceDetail(node._data, data.links);
     } else if (params.edges.length > 0) {
+      selectedDeviceId = null;
       const edge = edgesDataset.get(params.edges[0]);
       showEdgeDetail(edge._data);
     } else {
+      selectedDeviceId = null;
       resetDetailPanel();
     }
   });
@@ -277,6 +335,32 @@ function renderNetwork(data, isInitialLoad = false) {
 
   updateStats(data);
   enableExportButtons(true);
+  
+  // Start flashing alert logic for audited links containing mismatches
+  startAuditFlashing();
+}
+
+function startAuditFlashing() {
+  if (auditFlashInterval) clearInterval(auditFlashInterval);
+  let flashState = false;
+  
+  auditFlashInterval = setInterval(() => {
+    if (!edgesDataset || !currentTopology) return;
+    const updates = [];
+    currentTopology.links.forEach((l, index) => {
+      if (l.vlan_mismatch || l.subnet_mismatch || l.mtu_mismatch || l.speed_mismatch) {
+        updates.push({
+          id: index,
+          dashing: flashState ? [5, 5] : false,
+          width: flashState ? 4.0 : 2.5
+        });
+      }
+    });
+    if (updates.length > 0) {
+      edgesDataset.update(updates);
+    }
+    flashState = !flashState;
+  }, 1000);
 }
 
 function getOptions() {
@@ -286,6 +370,7 @@ function getOptions() {
       stabilization: { iterations: 150 },
     },
     layout: {
+      randomSeed: 42,
       hierarchical: { enabled: false }
     },
     interaction: {
@@ -339,12 +424,17 @@ function getOptions() {
   };
   if (currentLayout === 'hierarchical') {
     base.layout = {
+      randomSeed: 42,
       hierarchical: {
         enabled: !isEditingMode,
         direction: 'UD',
-        sortMethod: 'directed',
-        levelSeparation: 110,
-        nodeSpacing: 160,
+        sortMethod: 'hubsize',
+        levelSeparation: 120,
+        nodeSpacing: 180,
+        treeSpacing: 200,
+        blockShifting: true,
+        edgeMinimization: true,
+        parentCentralization: true,
       },
     };
     base.physics = { enabled: false };
@@ -404,6 +494,20 @@ function onNodeSizeSliderChanged(val) {
 }
 
 function setLayout(layout) {
+  // Capture current positions if switching from hierarchical to free AND the topology doesn't have custom coordinates yet.
+  // This prevents layout reshuffling on first switch, while preserving custom dragged/loaded positions on subsequent switches.
+  if (currentLayout === 'hierarchical' && layout === 'free' && network && currentTopology) {
+    if (!hasCustomCoordinates()) {
+      const positions = network.getPositions();
+      currentTopology.devices.forEach(d => {
+        if (positions[d.id]) {
+          d.x = positions[d.id].x;
+          d.y = positions[d.id].y;
+        }
+      });
+    }
+  }
+
   currentLayout = layout;
   updateLayoutToggleUI(layout);
   if (currentTopology) {
@@ -559,11 +663,367 @@ function resetNodeHighlight() {
   network.unselectAll();
 }
 
+function showBulkActionPanel(deviceIds) {
+  if (!currentTopology) return;
+  const devices = deviceIds.map(id => currentTopology.devices.find(d => d.id === id)).filter(Boolean);
+  
+  document.getElementById('detail-title').textContent = `Bulk Actions (${devices.length})`;
+  
+  const selectEl = document.getElementById('terminal-mode-select');
+  const termMode = selectEl ? selectEl.value : 'mock';
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-card">
+      <div class="card-title">Selected Devices</div>
+      <div style="max-height: 120px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 6px; padding: 6px; background: #161b22;">
+        ${devices.map(d => `
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 4px 6px; border-bottom: 1px solid #21262d;">
+            <span style="font-weight:600; color: #c9d1d9;">${d.label}</span>
+            <span class="uppercase-badge">${d.type}</span>
+          </div>
+        `).join('')}
+      </div>
+      
+      <div class="form-group" style="margin-top: 12px;">
+        <label for="bulk-cmd-input">Run Command</label>
+        <input type="text" id="bulk-cmd-input" placeholder="e.g. show version, show ip interface brief" style="width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 10px; font-family: monospace; outline: none; margin-bottom: 12px;">
+      </div>
+
+      <div id="bulk-creds-fields" style="display: ${termMode === 'ssh' ? 'block' : 'none'}; margin-top: 12px; border-top: 1px solid #21262d; padding-top: 12px;">
+        <div class="form-group">
+          <label for="bulk-user">SSH Username</label>
+          <input type="text" id="bulk-user" value="cisco" style="width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 6px 8px; margin-bottom: 8px;">
+        </div>
+        <div class="form-group">
+          <label for="bulk-pass">SSH Password</label>
+          <input type="password" id="bulk-pass" placeholder="Password" style="width: 100%; box-sizing: border-box; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 6px 8px;">
+        </div>
+      </div>
+
+      <button id="run-bulk-btn" class="ctrl-btn active" style="width: 100%; margin-top: 16px;">
+        Run Bulk Command
+      </button>
+    </div>
+  `;
+
+  setDetailVisible(true);
+
+  const cmdInput = document.getElementById('bulk-cmd-input');
+  cmdInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      executeBulkCommand(deviceIds, cmdInput.value);
+    }
+  });
+
+  const runBtn = document.getElementById('run-bulk-btn');
+  runBtn.addEventListener('click', () => {
+    executeBulkCommand(deviceIds, cmdInput.value);
+  });
+}
+
+async function executeBulkCommand(deviceIds, command) {
+  if (!command || !command.trim()) {
+    showToast('Please enter a CLI command to run.', 'warning');
+    return;
+  }
+
+  const selectEl = document.getElementById('terminal-mode-select');
+  const termMode = selectEl ? selectEl.value : 'mock';
+
+  const runBtn = document.getElementById('run-bulk-btn');
+  const originalText = runBtn.textContent;
+  runBtn.disabled = true;
+  runBtn.textContent = 'Executing...';
+
+  let username = null;
+  let password = null;
+  if (termMode === 'ssh') {
+    username = document.getElementById('bulk-user')?.value || 'admin';
+    password = document.getElementById('bulk-pass')?.value || '';
+  }
+
+  try {
+    const response = await fetch('/api/runbook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        device_ids: deviceIds,
+        command: command.trim(),
+        username: username,
+        password: password,
+        mock_mode: termMode === 'mock'
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      showToast('Runbook error: ' + (err.detail || response.statusText), 'error');
+      return;
+    }
+
+    const result = await response.json();
+    displayRunbookOutputs(command.trim(), result.outputs);
+    showToast(`Executed command on ${deviceIds.length} devices`, 'success');
+  } catch (error) {
+    console.error('Failed to run bulk CLI command:', error);
+    showToast('Network error during runbook execution', 'error');
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = originalText;
+  }
+}
+
+function displayRunbookOutputs(command, outputs) {
+  const drawer = document.getElementById('terminal-drawer');
+  drawer.classList.remove('closed');
+  drawer.classList.remove('minimized');
+  const minBtn = document.getElementById('terminal-min-btn');
+  if (minBtn) minBtn.textContent = '━';
+
+  const deviceIds = Object.keys(outputs);
+  let firstDeviceId = null;
+
+  deviceIds.forEach(deviceId => {
+    const device = currentTopology.devices.find(d => d.id === deviceId);
+    if (!device) return;
+    if (!firstDeviceId) firstDeviceId = deviceId;
+
+    if (!terminalSessions[deviceId]) {
+      const session = new TerminalSession(deviceId, device.label);
+      terminalSessions[deviceId] = session;
+
+      const tabsContainer = document.getElementById('terminal-tabs');
+      const tabEl = document.createElement('div');
+      tabEl.className = 'terminal-tab';
+      tabEl.dataset.deviceId = deviceId;
+      tabEl.innerHTML = `
+        <span class="terminal-tab-dot offline"></span>
+        <span class="terminal-tab-name">${device.label}</span>
+        <span class="terminal-tab-close">&times;</span>
+      `;
+
+      tabEl.addEventListener('click', () => {
+        switchSession(deviceId);
+      });
+
+      const closeBtn = tabEl.querySelector('.terminal-tab-close');
+      closeBtn.addEventListener('click', (e) => {
+        closeTab(deviceId, e);
+      });
+
+      tabsContainer.appendChild(tabEl);
+      session.updateStatus('offline', 'runbook output');
+    }
+
+    const session = terminalSessions[deviceId];
+    session.appendText(`\r\n\x1b[36m=== Bulk Runbook Command: '${command}' ===\x1b[0m\r\n`);
+    session.appendText(outputs[deviceId] + "\r\n");
+  });
+
+  if (firstDeviceId) {
+    switchSession(firstDeviceId);
+  }
+  adjustViewportForTerminal(true);
+}
+
+async function runPathTrace(sourceId, destIp) {
+  if (!destIp) {
+    showToast('Please enter a destination IP or hostname.', 'warning');
+    return;
+  }
+
+  const selectEl = document.getElementById('terminal-mode-select');
+  const termMode = selectEl ? selectEl.value : 'mock';
+
+  const traceBtn = document.getElementById('trace-path-btn');
+  const originalText = traceBtn.textContent;
+  traceBtn.disabled = true;
+  traceBtn.textContent = 'Tracing...';
+
+  try {
+    const response = await fetch('/api/path-trace', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        source_device_id: sourceId,
+        destination_ip: destIp,
+        username: null,
+        password: null,
+        mock_mode: termMode === 'mock'
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      showToast('Path trace error: ' + (err.detail || response.statusText), 'error');
+      return;
+    }
+
+    const result = await response.json();
+    const hops = result.hops;
+    
+    if (!hops || hops.length < 2) {
+      showToast('No path found or target unreachable', 'warning');
+      return;
+    }
+
+    highlightPathWithInterfaces(hops);
+    renderTraceResultInDetailPanel(sourceId, destIp, hops);
+    showToast(`Path trace completed: ${hops.length} hops`, 'success');
+  } catch (error) {
+    console.error('Failed to run path trace:', error);
+    showToast('Network error during path tracing', 'error');
+  } finally {
+    traceBtn.disabled = false;
+    traceBtn.textContent = originalText;
+  }
+}
+
+function highlightPathWithInterfaces(hops) {
+  if (!network || !nodesDataset || !edgesDataset || !hops || hops.length < 2) return;
+
+  const path = hops.map(h => h.device_id);
+  const highlightColor = '#ff9c3a'; // Orange for L3 routing trace
+  
+  const DIM_NODE = { background: '#161b22', border: '#21262d' };
+  const DIM_FONT = { color: '#3d444d' };
+
+  const nodeUpdates = nodesDataset.get().map(node => {
+    if (path.includes(node.id)) {
+      const colors = NODE_COLORS[node._data.type] || NODE_COLORS.switch;
+      return {
+        id: node.id,
+        color: { 
+          background: colors.background, 
+          border: highlightColor, 
+          highlight: { background: colors.background, border: highlightColor } 
+        },
+        borderWidth: 3,
+        shadow: { enabled: true, color: highlightColor, size: 15, x: 0, y: 0 }
+      };
+    }
+    return {
+      id: node.id,
+      color: { background: DIM_NODE.background, border: DIM_NODE.border },
+      font: { ...DIM_FONT },
+      borderWidth: 1,
+      shadow: false
+    };
+  });
+
+  const pathEdgeUpdates = {};
+  for (let i = 0; i < hops.length - 1; i++) {
+    const nodeA = hops[i].device_id;
+    const nodeB = hops[i+1].device_id;
+    const idx = getEdgeIdBetween(nodeA, nodeB);
+    if (idx !== -1) {
+      const edge = edgesDataset.get(idx);
+      const egress = hops[i].egress_interface || 'Gi0/1';
+      const ingress = hops[i+1].ingress_interface || 'Gi0/1';
+      pathEdgeUpdates[edge.id] = {
+        label: `${egress} ↔ ${ingress}`,
+        font: { color: '#ff9c3a', size: 11, background: '#0d1117', strokeWidth: 0 }
+      };
+    }
+  }
+
+  const edgeUpdates = edgesDataset.get().map(edge => {
+    if (pathEdgeUpdates[edge.id]) {
+      return {
+        id: edge.id,
+        color: { color: highlightColor, highlight: highlightColor },
+        width: 5,
+        shadow: { enabled: true, color: highlightColor, size: 10 },
+        smooth: currentLayout === 'free' ? false : { type: 'curvedCW', roundness: 0.1 },
+        dashing: true,
+        ...pathEdgeUpdates[edge.id]
+      };
+    }
+    return {
+      id: edge.id,
+      color: { color: '#161b22', highlight: '#161b22' },
+      width: 1,
+      shadow: false,
+      label: edge._data.protocol || ''
+    };
+  });
+
+  nodesDataset.update(nodeUpdates);
+  edgesDataset.update(edgeUpdates);
+
+  network.fit({
+    nodes: path,
+    animation: { duration: 600, easingFunction: 'easeInOutQuad' }
+  });
+}
+
+function renderTraceResultInDetailPanel(sourceId, destIp, hops) {
+  const sourceDevice = currentTopology.devices.find(d => d.id === sourceId);
+  const sourceLabel = sourceDevice ? sourceDevice.label : sourceId;
+
+  document.getElementById('detail-title').textContent = `Trace: to ${destIp}`;
+  
+  let html = `
+    <div class="detail-card">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <span style="font-size: 0.72rem; color: #8b949e; font-weight: 600;">SOURCE: ${sourceLabel}</span>
+        <button id="btn-back-to-device" class="ctrl-btn" style="width: auto; margin: 0; padding: 2px 8px; font-size: 0.65rem;">Back</button>
+      </div>
+      
+      <div style="position: relative; padding-left: 20px; margin-top: 15px; border-left: 2px dashed #30363d; margin-left: 8px;">
+        ${hops.map((hop, idx) => {
+          const isLast = idx === hops.length - 1;
+          const isFirst = idx === 0;
+          
+          return `
+            <div style="position: relative; margin-bottom: 20px;">
+              <span style="position: absolute; left: -27px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #ff9c3a; border: 3px solid #0d1117;"></span>
+              
+              <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${hop.label}</span>
+                  <span class="uppercase-badge">${hop.type}</span>
+                </div>
+                
+                <div style="font-size: 0.75rem; color: #8b949e; font-family: monospace; margin-top: 4px;">IP: ${hop.ip}</div>
+                
+                <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 0.7rem; font-family: monospace; color: #c9d1d9; border-top: 1px solid #21262d; padding-top: 6px;">
+                  ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${hop.ingress_interface}</div>` : ''}
+                  ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${hop.egress_interface}</div>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('detail-body').innerHTML = html;
+  setDetailVisible(true);
+
+  const backBtn = document.getElementById('btn-back-to-device');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      resetGraphHighlight();
+      const dev = currentTopology.devices.find(d => d.id === sourceId);
+      if (dev) showDeviceDetail(dev, currentTopology.links);
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Detail panel
 // ---------------------------------------------------------------------------
 function showDeviceDetail(device, links) {
   const connectedLinks = links.filter(l => l.source === device.id || l.target === device.id);
+  const statusInfo = deviceHealthStatuses[device.id] || { online: true, latency: null };
+  const isOnline = statusInfo.online;
+  const latency = statusInfo.latency;
 
   document.getElementById('detail-title').textContent = device.label;
   document.getElementById('detail-body').innerHTML = `
@@ -572,11 +1032,16 @@ function showDeviceDetail(device, links) {
       <div class="detail-row">
         <div class="detail-key">Status</div>
         <div class="detail-val">
-          <span class="status-badge online">
-            <span class="status-badge-dot"></span>Online
+          <span class="status-badge ${isOnline ? 'online' : 'offline'}">
+            <span class="status-badge-dot"></span>${isOnline ? 'Online' : 'Offline'}
           </span>
         </div>
       </div>
+      ${isOnline && latency !== null && latency !== undefined ? `
+      <div class="detail-row">
+        <div class="detail-key">Latency</div>
+        <div class="detail-val font-mono highlight-text">${latency}ms</div>
+      </div>` : ''}
       <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val uppercase-badge">${device.type}</div></div>
       <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val uppercase-badge">${device.layer}</div></div>
       ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val font-mono highlight-text">${device.ip}</div></div>` : ''}
@@ -612,6 +1077,39 @@ function showDeviceDetail(device, links) {
       </div>
     </div>
 
+    <!-- Configured Interfaces Card -->
+    ${device.interfaces && device.interfaces.length > 0 ? `
+    <div class="detail-card">
+      <div class="card-title">Configured Interfaces (${device.interfaces.length})</div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${device.interfaces.map(iface => {
+          let modeBadge = `<span class="uppercase-badge" style="font-size: 0.65rem; padding: 2px 6px; font-weight: 600; color: #58a6ff; background: rgba(56, 139, 253, 0.15); border: 1px solid rgba(56, 139, 253, 0.3); border-radius: 4px;">${iface.mode || 'routed'}</span>`;
+          let detailsHtml = '';
+          if (iface.mode === 'access') {
+            detailsHtml = `<div style="color: #c9d1d9;">VLAN: <span style="color: #58a6ff;">${iface.vlan_access !== undefined && iface.vlan_access !== null ? iface.vlan_access : 'N/A'}</span></div>`;
+          } else if (iface.mode === 'trunk') {
+            detailsHtml = `<div style="color: #c9d1d9;">Native VLAN: <span style="color: #58a6ff;">${iface.vlan_native !== undefined && iface.vlan_native !== null ? iface.vlan_native : '1'}</span>${iface.vlan_trunk ? `<br>Allowed VLANs: <span style="color: #58a6ff;">${iface.vlan_trunk}</span>` : ''}</div>`;
+          } else {
+            detailsHtml = `<div style="color: #c9d1d9;">IP Address: <span style="color: #58a6ff;">${iface.ip || ''}/${iface.mask || ''}</span></div>`;
+          }
+          let sharedHtml = `<div style="color: #8b949e; font-size: 0.7rem; margin-top: 4px;">MTU: ${iface.mtu || 1500} | Speed: ${iface.speed || 'auto'}</div>`;
+          return `
+            <div style="background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 600; color: #c9d1d9; font-family: monospace;">${iface.name}</span>
+                ${modeBadge}
+              </div>
+              <div style="font-family: monospace; font-size: 0.72rem; line-height: 1.4;">
+                ${detailsHtml}
+                ${sharedHtml}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    ` : ''}
+
     <button id="open-console-btn" class="console-action-card">
       <div class="console-action-icon">&#128187;</div>
       <div class="console-action-text">
@@ -619,29 +1117,91 @@ function showDeviceDetail(device, links) {
         <div class="console-action-desc">Start interactive CLI session</div>
       </div>
     </button>
+
+    <!-- Path Tracing Card -->
+    <div class="detail-card">
+      <div class="card-title">L3 Path Tracing</div>
+      <div class="form-group" style="margin-top: 8px;">
+        <label for="trace-dst-input" style="font-size: 0.72rem; color: #8b949e;">Destination IP or Node Label:</label>
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <input type="text" id="trace-dst-input" placeholder="e.g. 10.0.0.3" style="flex: 1; min-width: 0; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 6px 8px; font-size: 0.8rem; outline: none; font-family: monospace;">
+          <button id="trace-path-btn" class="ctrl-btn active" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.8rem;">Trace</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config Drift Analysis Card -->
+    ${isTimelineMode && selectedBackupIndex !== -1 ? `
+    <div class="detail-card" style="margin-top: 12px;">
+      <div class="card-title">Config Drift Analysis</div>
+      <p style="font-size: 0.72rem; color: #8b949e; margin-bottom: 8px;">Compare configuration with selected timeline snapshot.</p>
+      <button id="view-config-diff-btn" class="ctrl-btn active" style="width: 100%;">
+        Compare Configuration
+      </button>
+    </div>
+    ` : ''}
   `;
   setDetailVisible(true);
+  
   const consoleBtn = document.getElementById('open-console-btn');
   if (consoleBtn) {
     consoleBtn.addEventListener('click', () => {
       openTerminalForDevice(device.id);
     });
   }
+
+  const traceBtn = document.getElementById('trace-path-btn');
+  if (traceBtn) {
+    traceBtn.addEventListener('click', () => {
+      const destIp = document.getElementById('trace-dst-input').value.trim();
+      runPathTrace(device.id, destIp);
+    });
+    document.getElementById('trace-dst-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const destIp = document.getElementById('trace-dst-input').value.trim();
+        runPathTrace(device.id, destIp);
+      }
+    });
+  }
+
+  const diffBtn = document.getElementById('view-config-diff-btn');
+  if (diffBtn) {
+    diffBtn.addEventListener('click', () => {
+      showConfigDiffModal(device.id);
+    });
+  }
 }
 
 function showEdgeDetail(link) {
+  let warningsHtml = '';
+  if (link.warnings && link.warnings.length > 0) {
+    warningsHtml = `
+      <div class="audit-warning-card" style="margin-top: 15px; padding: 12px; background: rgba(255, 159, 67, 0.15); border: 1px solid #ff9f43; border-radius: 6px;">
+        <div style="font-weight: bold; color: #ff9f43; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Protocol & Link Audit Mismatches
+        </div>
+        <ul style="margin: 0; padding-left: 18px; color: #ffb067; font-size: 11.5px; line-height: 1.5; text-align: left;">
+          ${link.warnings.map(w => `<li>${w}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+  }
+
   document.getElementById('detail-title').textContent = `Link: ${link.source} ↔ ${link.target}`;
   document.getElementById('detail-body').innerHTML = `
     <div class="detail-row"><div class="detail-key">Protocol</div><div class="detail-val">${link.protocol || 'N/A'}</div></div>
     <div class="detail-row"><div class="detail-key">Bandwidth</div><div class="detail-val">${link.bandwidth || 'N/A'}</div></div>
     ${link.src_iface ? `<div class="detail-row"><div class="detail-key">Source Interface</div><div class="detail-val">${link.src_iface}</div></div>` : ''}
     ${link.dst_iface ? `<div class="detail-row"><div class="detail-key">Dest Interface</div><div class="detail-val">${link.dst_iface}</div></div>` : ''}
+    ${warningsHtml}
   `;
   setDetailVisible(true);
 }
 
 function resetDetailPanel() {
   setDetailVisible(false);
+  resetGraphHighlight();
 }
 
 function setDetailVisible(visible) {
@@ -658,6 +1218,89 @@ function updateStats(data) {
   document.getElementById('stats').innerHTML =
     `Devices: <b>${data.devices.length}</b><br>Links: <b>${data.links.length}</b><br>` +
     Object.entries(types).map(([t, n]) => `${t}: ${n}`).join('<br>');
+  
+  updateDiagnosticsSummary(data);
+}
+
+function updateDiagnosticsSummary(data) {
+  const container = document.getElementById('diagnostics-summary');
+  if (!container) return;
+
+  const mismatchLinks = data.links.filter(l => l.vlan_mismatch || l.subnet_mismatch || l.mtu_mismatch || l.speed_mismatch);
+  
+  if (mismatchLinks.length === 0) {
+    container.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; color: #3fb950; font-weight: 500; font-size: 0.8rem; margin-top: 5px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        All links healthy
+      </div>
+    `;
+    return;
+  }
+
+  let html = `
+    <div style="display: flex; align-items: center; gap: 8px; color: #ff9f43; font-weight: 500; font-size: 0.8rem; margin-bottom: 8px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Found ${mismatchLinks.length} issue${mismatchLinks.length > 1 ? 's' : ''}
+    </div>
+    <div style="max-height: 180px; overflow-y: auto; border: 1px solid #21262d; border-radius: 4px; padding: 4px; display: flex; flex-direction: column; gap: 4px;">
+  `;
+
+  mismatchLinks.forEach(l => {
+    let typeLabel = 'Warning';
+    let typeColor = '#ffc107';
+    if (l.subnet_mismatch) {
+      typeLabel = 'Subnet';
+      typeColor = '#f85149';
+    } else if (l.vlan_mismatch) {
+      typeLabel = 'VLAN';
+      typeColor = '#ff9f43';
+    } else if (l.mtu_mismatch) {
+      typeLabel = 'MTU';
+    } else if (l.speed_mismatch) {
+      typeLabel = 'Speed';
+    }
+
+    // Find the edge index in currentTopology.links to select it on click
+    const edgeId = data.links.indexOf(l);
+
+    html += `
+      <div class="diag-item" onclick="focusOnEdge(${edgeId})" style="cursor: pointer; padding: 6px; border-radius: 4px; background: #161b22; font-size: 0.72rem; border-left: 3px solid ${typeColor}; transition: background 0.2s; text-align: left;">
+        <div style="font-weight: 600; display: flex; justify-content: space-between; margin-bottom: 2px;">
+          <span>${l.source} ↔ ${l.target}</span>
+          <span style="color: ${typeColor}; font-size: 0.65rem;">[${typeLabel}]</span>
+        </div>
+        <div style="color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${l.warnings[0] || ''}">
+          ${l.warnings[0] || 'Mismatch detected'}
+        </div>
+      </div>
+    `;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function focusOnEdge(edgeId) {
+  if (!network || !edgesDataset) return;
+  const edge = edgesDataset.get(edgeId);
+  if (!edge) return;
+  
+  // Select the edge
+  network.selectEdges([edgeId]);
+  
+  // Show details
+  showEdgeDetail(edge._data);
+  
+  // Center camera on the connected nodes
+  const nodeIds = [edge.from, edge.to];
+  network.fit({
+    nodes: nodeIds,
+    animation: {
+      duration: 500,
+      easingFunction: 'easeInOutQuad'
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -736,8 +1379,22 @@ function showToast(message, type = 'info', duration = 3500) {
 // ---------------------------------------------------------------------------
 // Loading state
 // ---------------------------------------------------------------------------
-function setLoading(loading) {
-  document.getElementById('canvas-loading').classList.toggle('hidden', !loading);
+function setLoading(loading, text = 'Loading topology…', showLog = false) {
+  const el = document.getElementById('canvas-loading');
+  if (el) {
+    el.classList.toggle('hidden', !loading);
+  }
+  const textEl = document.getElementById('canvas-loading-text');
+  if (textEl) {
+    textEl.textContent = text;
+  }
+  const logEl = document.getElementById('discovery-log-container');
+  if (logEl) {
+    logEl.style.display = (loading && showLog) ? 'block' : 'none';
+    if (!loading) {
+      logEl.innerHTML = '';
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -784,6 +1441,16 @@ function toggleEditMode() {
       currentLayout = 'free';
       updateLayoutToggleUI('free');
       showToast('Switched to Free layout to preserve your custom positions.', 'info');
+      
+      // Update edge smoothing to straight
+      if (edgesDataset) {
+        const allEdges = edgesDataset.get();
+        const updates = allEdges.map(e => ({
+          id: e.id,
+          smooth: false
+        }));
+        edgesDataset.update(updates);
+      }
     }
     hasDraggedNode = false;
     
@@ -803,6 +1470,9 @@ function toggleEditMode() {
       },
       physics: {
         enabled: currentLayout === 'free' && !isEditingMode && !hasCustomCoordinates()
+      },
+      edges: {
+        smooth: currentLayout === 'free' ? false : { type: 'curvedCW', roundness: 0.1 }
       }
     });
     if (!isEditingMode) {
@@ -810,13 +1480,17 @@ function toggleEditMode() {
     }
   }
 
-  // Update nodes dataset fixed state
+  // Update nodes dataset fixed state and clear/restore level constraint
   if (nodesDataset) {
     const allNodes = nodesDataset.get();
-    const updates = allNodes.map(n => ({
-      id: n.id,
-      fixed: !isEditingMode
-    }));
+    const updates = allNodes.map(n => {
+      const isHierarchical = currentLayout === 'hierarchical';
+      return {
+        id: n.id,
+        fixed: !isEditingMode,
+        level: (isHierarchical && !isEditingMode) ? (LAYER_LEVEL[n._data.layer] || 3) : null
+      };
+    });
     nodesDataset.update(updates);
   }
 }
@@ -898,7 +1572,8 @@ async function loadServerLayout(filename) {
 async function uploadTopology(event) {
   const file = event.target.files[0];
   if (!file) return;
-  setLoading(true);
+  const isZip = file.name.endsWith('.zip');
+  setLoading(true, isZip ? 'Importing and parsing config zip...' : 'Loading topology…');
   const form = new FormData();
   form.append('file', file);
   try {
@@ -935,6 +1610,54 @@ let _ws = null;
 let _wsReconnectTimer = null;
 let _wsDelay = 1000; // ms; doubles on each failure, capped at 30s
 
+function handleStatusUpdate(statuses) {
+  deviceHealthStatuses = statuses;
+  if (!nodesDataset) return;
+
+  const updates = [];
+  for (const [deviceId, status] of Object.entries(statuses)) {
+    const node = nodesDataset.get(deviceId);
+    if (!node) continue;
+
+    const isOnline = status.online;
+    const latency = status.latency;
+
+    // Red pulsing shadow for offline nodes, normal shadow for online nodes
+    const shadowOptions = isOnline 
+      ? { enabled: true, color: 'rgba(0,0,0,0.5)', size: 10, x: 5, y: 5 }
+      : { enabled: true, color: '#f85149', size: 20, x: 0, y: 0 };
+
+    // Rebuild tooltip with health information
+    const baseData = node._data;
+    let tooltip = `${baseData.label}\nType: ${baseData.type}\nLayer: ${baseData.layer}`;
+    if (baseData.ip) tooltip += `\nIP: ${baseData.ip}`;
+    if (baseData.platform) tooltip += `\nPlatform: ${baseData.platform}`;
+    
+    tooltip += `\nStatus: ${isOnline ? 'Online' : 'Offline'}`;
+    if (isOnline && latency !== undefined && latency !== null) {
+      tooltip += `\nLatency: ${latency}ms`;
+    }
+
+    updates.push({
+      id: deviceId,
+      shadow: shadowOptions,
+      title: tooltip
+    });
+  }
+
+  if (updates.length > 0) {
+    nodesDataset.update(updates);
+  }
+
+  // If the currently selected node received an update, refresh the detail panel
+  if (selectedDeviceId && statuses[selectedDeviceId] && currentTopology) {
+    const node = nodesDataset.get(selectedDeviceId);
+    if (node) {
+      showDeviceDetail(node._data, currentTopology.links);
+    }
+  }
+}
+
 function initWebSocket() {
   clearTimeout(_wsReconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -951,7 +1674,17 @@ function initWebSocket() {
     _ws.onmessage = event => {
       try {
         const data = JSON.parse(event.data);
-        if (data && data.devices && data.links) {
+        if (data && data.type === 'status_update') {
+          handleStatusUpdate(data.statuses);
+        } else if (data && data.type === 'discovery_log') {
+          const logEl = document.getElementById('discovery-log-container');
+          if (logEl) {
+            const div = document.createElement('div');
+            div.textContent = data.message;
+            logEl.appendChild(div);
+            logEl.scrollTop = logEl.scrollHeight;
+          }
+        } else if (data && data.devices && data.links) {
           renderNetwork(data);
           showToast('Topology updated via live feed', 'info');
         }
@@ -1019,6 +1752,111 @@ function handleMenuPaste() {
 let pendingCallback = null;
 let pendingNodeAction = null;
 
+function addInterfaceRowToModal(iface = {}) {
+  const container = document.getElementById('modal-interfaces-list');
+  if (!container) return;
+
+  const rowId = `iface-row-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  
+  const name = iface.name || '';
+  const mode = iface.mode || 'routed';
+  const ip = iface.ip || '';
+  const mask = iface.mask || '';
+  const vlanAccess = iface.vlan_access !== undefined && iface.vlan_access !== null ? iface.vlan_access : '';
+  const vlanNative = iface.vlan_native !== undefined && iface.vlan_native !== null ? iface.vlan_native : '';
+  const vlanTrunk = iface.vlan_trunk || '';
+  const mtu = iface.mtu !== undefined && iface.mtu !== null ? iface.mtu : '';
+  const speed = iface.speed || '';
+
+  const rowHtml = `
+    <div class="interface-row" id="${rowId}" style="background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 8px; position: relative;">
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+        <input type="text" class="iface-name" placeholder="Interface (e.g. Gi1/0/1)" value="${name}" style="flex: 2; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;" required>
+        <select class="iface-mode" style="flex: 1.5; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
+          <option value="routed" ${mode === 'routed' ? 'selected' : ''}>Routed</option>
+          <option value="trunk" ${mode === 'trunk' ? 'selected' : ''}>Trunk</option>
+          <option value="access" ${mode === 'access' ? 'selected' : ''}>Access</option>
+        </select>
+        <button type="button" class="iface-delete-btn" style="background: transparent; border: none; color: #f85149; cursor: pointer; padding: 4px 8px; font-size: 1rem;" title="Delete Interface">
+          🗑️
+        </button>
+      </div>
+      <div class="iface-details-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+        <!-- Conditional L3 fields (IP/Mask) -->
+        <div class="iface-field-group iface-l3-fields" style="${mode === 'routed' ? '' : 'display: none;'}">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">IP Address</label>
+          <input type="text" class="iface-ip" placeholder="e.g. 10.0.1.1" value="${ip}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <div class="iface-field-group iface-l3-fields" style="${mode === 'routed' ? '' : 'display: none;'}">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Subnet Mask</label>
+          <input type="text" class="iface-mask" placeholder="e.g. 255.255.255.252" value="${mask}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <!-- Conditional L2 Access fields -->
+        <div class="iface-field-group iface-access-fields" style="grid-column: span 2; ${mode === 'access' ? '' : 'display: none;'}">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Access VLAN</label>
+          <input type="number" class="iface-vlan-access" placeholder="e.g. 10" value="${vlanAccess}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <!-- Conditional L2 Trunk fields -->
+        <div class="iface-field-group iface-trunk-fields" style="${mode === 'trunk' ? '' : 'display: none;'}">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Native VLAN</label>
+          <input type="number" class="iface-vlan-native" placeholder="e.g. 1" value="${vlanNative}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <div class="iface-field-group iface-trunk-fields" style="${mode === 'trunk' ? '' : 'display: none;'}">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Allowed VLANs</label>
+          <input type="text" class="iface-vlan-trunk" placeholder="e.g. 10,20,30" value="${vlanTrunk}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <!-- Shared fields -->
+        <div class="iface-field-group">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">MTU</label>
+          <input type="number" class="iface-mtu" placeholder="e.g. 1500" value="${mtu}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+        <div class="iface-field-group">
+          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Speed</label>
+          <input type="text" class="iface-speed" placeholder="e.g. auto, 1000, 10g" value="${speed}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        </div>
+      </div>
+    </div>
+  `;
+  
+  container.insertAdjacentHTML('beforeend', rowHtml);
+  
+  const newRow = document.getElementById(rowId);
+  if (!newRow) return;
+  
+  // Bind change listener to mode select
+  const modeSelect = newRow.querySelector('.iface-mode');
+  if (modeSelect) {
+    modeSelect.addEventListener('change', (e) => {
+      const newMode = e.target.value;
+      const l3Fields = newRow.querySelectorAll('.iface-l3-fields');
+      const accessFields = newRow.querySelectorAll('.iface-access-fields');
+      const trunkFields = newRow.querySelectorAll('.iface-trunk-fields');
+      
+      if (newMode === 'routed') {
+        l3Fields.forEach(f => f.style.display = '');
+        accessFields.forEach(f => f.style.display = 'none');
+        trunkFields.forEach(f => f.style.display = 'none');
+      } else if (newMode === 'access') {
+        l3Fields.forEach(f => f.style.display = 'none');
+        accessFields.forEach(f => f.style.display = '');
+        trunkFields.forEach(f => f.style.display = 'none');
+      } else if (newMode === 'trunk') {
+        l3Fields.forEach(f => f.style.display = 'none');
+        accessFields.forEach(f => f.style.display = 'none');
+        trunkFields.forEach(f => f.style.display = '');
+      }
+    });
+  }
+  
+  // Bind delete button listener
+  const deleteBtn = newRow.querySelector('.iface-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      newRow.remove();
+    });
+  }
+}
+
 function showNodeEditor(action, data, callback) {
   pendingCallback = callback;
   pendingNodeAction = action;
@@ -1028,6 +1866,12 @@ function showNodeEditor(action, data, callback) {
   document.getElementById('node-modal-title').textContent = isEdit ? 'Edit Node' : 'Add Node';
   document.getElementById('node-id').value = data.id || `node-${Math.random().toString(36).substr(2, 6)}`;
   
+  // Clear interfaces list
+  const listContainer = document.getElementById('modal-interfaces-list');
+  if (listContainer) {
+    listContainer.innerHTML = '';
+  }
+
   if (isEdit && currentTopology) {
     const existing = currentTopology.devices.find(d => d.id === data.id);
     if (existing) {
@@ -1036,6 +1880,13 @@ function showNodeEditor(action, data, callback) {
       document.getElementById('node-layer').value = existing.layer || 'access';
       document.getElementById('node-ip').value = existing.ip || '';
       document.getElementById('node-platform').value = existing.platform || '';
+      
+      // Populate interfaces
+      if (existing.interfaces && Array.isArray(existing.interfaces)) {
+        existing.interfaces.forEach(iface => {
+          addInterfaceRowToModal(iface);
+        });
+      }
     }
   } else {
     document.getElementById('node-label').value = data.label || '';
@@ -1043,6 +1894,12 @@ function showNodeEditor(action, data, callback) {
     document.getElementById('node-layer').value = data.layer || 'access';
     document.getElementById('node-ip').value = data.ip || '';
     document.getElementById('node-platform').value = data.platform || '';
+    
+    if (data.interfaces && Array.isArray(data.interfaces)) {
+      data.interfaces.forEach(iface => {
+        addInterfaceRowToModal(iface);
+      });
+    }
   }
   
   modal.classList.remove('hidden');
@@ -1076,6 +1933,11 @@ document.getElementById('node-cancel')?.addEventListener('click', () => {
   pendingCallback = null;
 });
 
+// Bind "+ Add Interface" button click
+document.getElementById('btn-add-interface')?.addEventListener('click', () => {
+  addInterfaceRowToModal();
+});
+
 document.getElementById('node-save')?.addEventListener('click', () => {
   const id = document.getElementById('node-id').value;
   const label = document.getElementById('node-label').value;
@@ -1092,7 +1954,47 @@ document.getElementById('node-save')?.addEventListener('click', () => {
     return;
   }
 
-  const deviceData = { id, label, type, layer, ip, platform };
+  // Extract interfaces from rows
+  const interfaces = [];
+  const rows = document.querySelectorAll('#modal-interfaces-list .interface-row');
+  rows.forEach(row => {
+    const nameInput = row.querySelector('.iface-name');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) return; // skip row if name is empty
+    
+    const modeSelect = row.querySelector('.iface-mode');
+    const mode = modeSelect ? modeSelect.value : 'routed';
+    
+    const mtuInput = row.querySelector('.iface-mtu');
+    const mtuVal = mtuInput ? mtuInput.value.trim() : '';
+    const mtu = mtuVal ? parseInt(mtuVal, 10) : null;
+    
+    const speedInput = row.querySelector('.iface-speed');
+    const speed = speedInput ? speedInput.value.trim() || null : null;
+    
+    const ifaceData = { name, mode, mtu, speed };
+    
+    if (mode === 'routed') {
+      const ipInput = row.querySelector('.iface-ip');
+      const maskInput = row.querySelector('.iface-mask');
+      ifaceData.ip = ipInput ? ipInput.value.trim() || null : null;
+      ifaceData.mask = maskInput ? maskInput.value.trim() || null : null;
+    } else if (mode === 'access') {
+      const vlanAccessInput = row.querySelector('.iface-vlan-access');
+      const vlanAccessVal = vlanAccessInput ? vlanAccessInput.value.trim() : '';
+      ifaceData.vlan_access = vlanAccessVal ? parseInt(vlanAccessVal, 10) : null;
+    } else if (mode === 'trunk') {
+      const vlanNativeInput = row.querySelector('.iface-vlan-native');
+      const vlanTrunkInput = row.querySelector('.iface-vlan-trunk');
+      const vlanNativeVal = vlanNativeInput ? vlanNativeInput.value.trim() : '';
+      ifaceData.vlan_native = vlanNativeVal ? parseInt(vlanNativeVal, 10) : null;
+      ifaceData.vlan_trunk = vlanTrunkInput ? vlanTrunkInput.value.trim() || null : null;
+    }
+    
+    interfaces.push(ifaceData);
+  });
+
+  const deviceData = { id, label, type, layer, ip, platform, interfaces };
   
   if (pendingPastePosition) {
     deviceData.x = pendingPastePosition.x;
@@ -1429,7 +2331,7 @@ async function runDiscovery() {
   }
 
   closeDiscoverModal();
-  setLoading(true);
+  setLoading(true, 'Running discovery crawler...', true);
   
   try {
     const resp = await fetch('/api/discover', {
@@ -2077,6 +2979,11 @@ function toggleTerminalMinimize() {
 }
 
 function handleTerminalModeChange(mode) {
+  const bulkCreds = document.getElementById('bulk-creds-fields');
+  if (bulkCreds) {
+    bulkCreds.style.display = mode === 'ssh' ? 'block' : 'none';
+  }
+
   if (!activeSessionId) return;
   const session = terminalSessions[activeSessionId];
   if (!session) return;
@@ -2233,7 +3140,7 @@ function highlightExplicitPath(path, highlightType = 'trace') {
         color: { color: highlightColor, highlight: highlightColor },
         width: 5,
         shadow: { enabled: true, color: highlightColor, size: 10 },
-        smooth: { type: 'curvedCW', roundness: 0.1 },
+        smooth: currentLayout === 'free' ? false : { type: 'curvedCW', roundness: 0.1 },
         dashing: true
       };
     }
@@ -2282,5 +3189,407 @@ function highlightPath(sourceId, targetId, highlightType = 'trace') {
   
   const isPing = highlightType === 'ping';
   showToast(isPing ? 'Ping path highlighted in cyan' : 'Traceroute path highlighted in orange', 'info');
+}
+
+function setOverlayView(overlayType) {
+  if (!network || !nodesDataset || !edgesDataset || !currentTopology) return;
+
+  currentOverlay = overlayType;
+
+  if (overlayType === 'physical') {
+    resetGraphHighlight();
+    return;
+  }
+
+  const DIM_NODE = { background: '#161b22', border: '#21262d' };
+  const DIM_FONT = { color: '#3d444d' };
+  const DIM_EDGE = '#161b22';
+
+  const nodeUpdates = [];
+  const edgeUpdates = [];
+
+  const matchedNodeIds = new Set();
+  const matchedEdgeIds = new Set();
+
+  if (overlayType.startsWith('vlan-')) {
+    const vlanId = overlayType.substring(5); // "10", "20", "30", or "all"
+    
+    edgesDataset.get().map(edge => {
+      const linkVlan = edge._data.vlan;
+      
+      let isMatch = false;
+      let color = '#30363d';
+      let label = edge._data.protocol || '';
+
+      if (vlanId === 'all') {
+        if (linkVlan) {
+          isMatch = true;
+          color = linkVlan === '10' ? '#58a6ff' :
+                  linkVlan === '20' ? '#56d364' :
+                  linkVlan === '30' ? '#ff7b72' : '#ff9c3a'; // Trunk or other is orange
+          label = `VLAN ${linkVlan}`;
+        }
+      } else {
+        if (linkVlan === vlanId || linkVlan === 'Trunk') {
+          isMatch = true;
+          color = linkVlan === 'Trunk' ? '#ff9c3a' : '#58a6ff';
+          label = `VLAN ${linkVlan}`;
+        }
+      }
+
+      if (isMatch) {
+        matchedEdgeIds.add(edge.id);
+        matchedNodeIds.add(edge.from);
+        matchedNodeIds.add(edge.to);
+        edgeUpdates.push({
+          id: edge.id,
+          color: { color: color, highlight: color },
+          width: 4,
+          label: label,
+          font: { color: color, size: 10, background: '#0d1117', strokeWidth: 0 },
+          shadow: { enabled: true, color: color, size: 8 }
+        });
+      } else {
+        edgeUpdates.push({
+          id: edge.id,
+          color: { color: DIM_EDGE, highlight: DIM_EDGE },
+          width: 1,
+          label: '',
+          shadow: false
+        });
+      }
+    });
+  } else if (overlayType.startsWith('routing-')) {
+    const protocol = overlayType.substring(8).toUpperCase(); // "OSPF" or "BGP"
+    const color = protocol === 'OSPF' ? '#ff9c3a' : '#f85149';
+
+    edgesDataset.get().map(edge => {
+      const linkProto = edge._data.protocol;
+      
+      if (linkProto === protocol) {
+        matchedEdgeIds.add(edge.id);
+        matchedNodeIds.add(edge.from);
+        matchedNodeIds.add(edge.to);
+        edgeUpdates.push({
+          id: edge.id,
+          color: { color: color, highlight: color },
+          width: 5,
+          label: protocol,
+          font: { color: color, size: 11, background: '#0d1117', strokeWidth: 0 },
+          shadow: { enabled: true, color: color, size: 10 },
+          dashing: true
+        });
+      } else {
+        edgeUpdates.push({
+          id: edge.id,
+          color: { color: DIM_EDGE, highlight: DIM_EDGE },
+          width: 1,
+          label: '',
+          shadow: false,
+          dashing: false
+        });
+      }
+    });
+  }
+
+  nodesDataset.get().map(node => {
+    if (matchedNodeIds.has(node.id)) {
+      const colors = NODE_COLORS[node._data.type] || NODE_COLORS.switch;
+      const highlightColor = overlayType.startsWith('routing-') 
+        ? (overlayType.endsWith('ospf') ? '#ff9c3a' : '#f85149')
+        : '#58a6ff';
+        
+      nodeUpdates.push({
+        id: node.id,
+        color: { 
+          background: colors.background, 
+          border: highlightColor,
+          highlight: { background: colors.background, border: highlightColor }
+        },
+        borderWidth: 3,
+        shadow: { enabled: true, color: highlightColor, size: 12, x: 0, y: 0 }
+      });
+    } else {
+      nodeUpdates.push({
+        id: node.id,
+        color: { background: DIM_NODE.background, border: DIM_NODE.border },
+        font: { ...DIM_FONT },
+        borderWidth: 1,
+        shadow: false
+      });
+    }
+  });
+
+  nodesDataset.update(nodeUpdates);
+  edgesDataset.update(edgeUpdates);
+
+  if (matchedNodeIds.size > 0) {
+    network.fit({
+      nodes: Array.from(matchedNodeIds),
+      animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+    });
+  }
+}
+
+async function initTimeline() {
+  try {
+    const response = await fetch('/api/backups');
+    if (!response.ok) {
+      showToast('Failed to load timeline backups', 'error');
+      return;
+    }
+    const data = await response.json();
+    if (!data.backups || data.backups.length === 0) {
+      showToast('No backups found. Trigger "Save to Server" to create one first.', 'warning');
+      return;
+    }
+
+    // Reverse list so index 0 is oldest, last index is newest
+    backupsList = data.backups.reverse();
+    isTimelineMode = true;
+
+    const container = document.getElementById('timeline-container');
+    if (container) {
+      container.classList.remove('hidden');
+    }
+
+    const slider = document.getElementById('timeline-slider');
+    if (slider) {
+      slider.min = 0;
+      slider.max = backupsList.length - 1;
+      slider.value = backupsList.length - 1; // newest by default
+    }
+
+    loadBackupIndex(backupsList.length - 1);
+    showToast('Timeline Compare Mode active', 'success');
+  } catch (error) {
+    console.error('Failed to initialize timeline:', error);
+    showToast('Network error loading timeline', 'error');
+  }
+}
+
+function onTimelineSliderInput(val) {
+  loadBackupIndex(parseInt(val));
+}
+
+async function loadBackupIndex(index) {
+  if (index < 0 || index >= backupsList.length) return;
+  selectedBackupIndex = index;
+  const backup = backupsList[index];
+
+  const d = new Date(backup.timestamp * 1000);
+  const dateString = d.toLocaleString();
+  const label = document.getElementById('timeline-date-label');
+  if (label) {
+    label.textContent = dateString;
+  }
+
+  try {
+    const response = await fetch('/api/layouts/backups/' + backup.filename);
+    if (!response.ok) {
+      showToast('Failed to load snapshot layout data', 'error');
+      return;
+    }
+    const histTopology = await response.json();
+
+    if (isCompareMode) {
+      compareTopologies(histTopology);
+    } else {
+      renderNetwork(histTopology, false);
+    }
+
+    if (selectedDeviceId) {
+      const node = nodesDataset.get(selectedDeviceId);
+      if (node) {
+        showDeviceDetail(node._data, currentTopology.links);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load snapshot layout:', error);
+    showToast('Network error loading snapshot data', 'error');
+  }
+}
+
+function toggleTimelineMode() {
+  isCompareMode = !isCompareMode;
+  const btn = document.getElementById('btn-timeline-toggle');
+  if (btn) {
+    btn.textContent = isCompareMode ? 'Compare Mode' : 'Snapshot View';
+    btn.classList.toggle('active', isCompareMode);
+  }
+  if (selectedBackupIndex !== -1) {
+    loadBackupIndex(selectedBackupIndex);
+  }
+}
+
+function exitTimelineMode() {
+  isTimelineMode = false;
+  selectedBackupIndex = -1;
+  
+  const container = document.getElementById('timeline-container');
+  if (container) {
+    container.classList.add('hidden');
+  }
+
+  if (currentTopology) {
+    renderNetwork(currentTopology, false);
+  }
+
+  if (selectedDeviceId) {
+    const node = nodesDataset.get(selectedDeviceId);
+    if (node) {
+      showDeviceDetail(node._data, currentTopology.links);
+    }
+  }
+  
+  showToast('Timeline Mode exited. Returned to Live View.', 'info');
+}
+
+function compareTopologies(histTopo) {
+  if (!currentTopology || !nodesDataset || !edgesDataset) return;
+
+  const { nodes, edges } = buildGraph(currentTopology);
+  nodesDataset.clear();
+  nodesDataset.add(nodes);
+  edgesDataset.clear();
+  edgesDataset.add(edges);
+
+  const histLinks = histTopo.links || [];
+  const currentLinks = currentTopology.links || [];
+
+  const histDevices = histTopo.devices || [];
+  const currentDevices = currentTopology.devices || [];
+
+  const currentDeviceIds = new Set(currentDevices.map(d => d.id));
+  const histDeviceIds = new Set(histDevices.map(d => d.id));
+
+  const nodeUpdates = nodesDataset.get().map(node => {
+    if (!histDeviceIds.has(node.id)) {
+      return {
+        id: node.id,
+        borderWidth: 3,
+        color: { border: '#56d364' },
+        shadow: { enabled: true, color: '#56d364', size: 15, x: 0, y: 0 }
+      };
+    }
+    return node;
+  });
+  nodesDataset.update(nodeUpdates);
+
+  histDevices.forEach(d => {
+    if (!currentDeviceIds.has(d.id)) {
+      const colors = NODE_COLORS[d.type] || NODE_COLORS.switch;
+      nodesDataset.add({
+        id: d.id,
+        label: d.label + ' (Deleted)',
+        type: d.type,
+        layer: d.layer,
+        color: { background: '#161b22', border: '#f85149' },
+        font: { color: '#f85149' },
+        borderWidth: 2,
+        shadow: { enabled: true, color: '#f85149', size: 10, x: 0, y: 0 },
+        x: d.x,
+        y: d.y,
+        _data: d
+      });
+    }
+  });
+
+  const getLinkKey = l => `${l.source}_${l.target}`;
+  const getReverseLinkKey = l => `${l.target}_${l.source}`;
+
+  const currentLinkKeys = new Set();
+  currentLinks.forEach(l => {
+    currentLinkKeys.add(getLinkKey(l));
+    currentLinkKeys.add(getReverseLinkKey(l));
+  });
+
+  const histLinkKeys = new Set();
+  histLinks.forEach(l => {
+    histLinkKeys.add(getLinkKey(l));
+    histLinkKeys.add(getReverseLinkKey(l));
+  });
+
+  const edgeUpdates = edgesDataset.get().map(edge => {
+    const linkKey = `${edge.from}_${edge.to}`;
+    if (!histLinkKeys.has(linkKey)) {
+      return {
+        id: edge.id,
+        color: { color: '#56d364', highlight: '#56d364' },
+        width: 5,
+        label: 'Added',
+        font: { color: '#56d364', size: 10, background: '#0d1117', strokeWidth: 0 }
+      };
+    }
+    return edge;
+  });
+  edgesDataset.update(edgeUpdates);
+
+  histLinks.forEach(l => {
+    const linkKey = getLinkKey(l);
+    if (!currentLinkKeys.has(linkKey)) {
+      edgesDataset.add({
+        id: 'deleted_' + l.source + '_' + l.target,
+        from: l.source,
+        to: l.target,
+        color: { color: '#f85149', highlight: '#f85149' },
+        width: 3,
+        dashing: true,
+        label: 'Deleted',
+        font: { color: '#f85149', size: 10, background: '#0d1117', strokeWidth: 0 }
+      });
+    }
+  });
+}
+
+async function showConfigDiffModal(deviceId) {
+  if (selectedBackupIndex === -1 || !backupsList[selectedBackupIndex]) return;
+  const backup = backupsList[selectedBackupIndex];
+  
+  const body = document.getElementById('config-diff-body');
+  if (body) body.textContent = "Loading configuration difference analysis...";
+  
+  const modal = document.getElementById('config-diff-modal');
+  if (modal) modal.classList.remove('hidden');
+
+  try {
+    const url = `/api/backups/diff?device_id=${encodeURIComponent(deviceId)}&file1=${encodeURIComponent(backup.filename)}&file2=topology.json`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const err = await response.json();
+      if (body) body.textContent = "Error: " + (err.detail || response.statusText);
+      return;
+    }
+    const data = await response.json();
+    
+    if (body) {
+      if (!data.diff) {
+        body.innerHTML = `<span style="color: #8b949e;">Configurations are identical. No drift detected.</span>`;
+      } else {
+        const highlighted = data.diff.split('\n').map(line => {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            return `<span style="color: #56d364;">${escapeHtml(line)}</span>`;
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            return `<span style="color: #f85149;">${escapeHtml(line)}</span>`;
+          } else if (line.startsWith('@@')) {
+            return `<span style="color: #58a6ff;">${escapeHtml(line)}</span>`;
+          }
+          return escapeHtml(line);
+        }).join('\n');
+        body.innerHTML = highlighted;
+      }
+    }
+  } catch (error) {
+    if (body) body.textContent = "Failed to communicate with server: " + error.message;
+  }
+}
+
+function closeConfigDiffModal() {
+  const modal = document.getElementById('config-diff-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 

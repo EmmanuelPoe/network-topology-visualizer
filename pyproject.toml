@@ -26,3 +26,9 @@ dev = [
     "jsonlint>=0.1",
     "ruff>=0.15.13",
 ]
+
+[tool.pytest.ini_options]
+norecursedirs = ["scratch", ".git", ".venv"]
+testpaths = ["tests"]
+pythonpath = ["."]
+
