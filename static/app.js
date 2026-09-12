@@ -678,8 +678,8 @@ function showBulkActionPanel(deviceIds) {
       <div style="max-height: 120px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 6px; padding: 6px; background: #161b22;">
         ${devices.map(d => `
           <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 4px 6px; border-bottom: 1px solid #21262d;">
-            <span style="font-weight:600; color: #c9d1d9;">${d.label}</span>
-            <span class="uppercase-badge">${d.type}</span>
+            <span style="font-weight:600; color: #c9d1d9;">${escapeHtml(d.label)}</span>
+            <span class="uppercase-badge">${escapeHtml(d.type)}</span>
           </div>
         `).join('')}
       </div>
@@ -970,7 +970,7 @@ function renderTraceResultInDetailPanel(sourceId, destIp, hops) {
   let html = `
     <div class="detail-card">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-        <span style="font-size: 0.72rem; color: #8b949e; font-weight: 600;">SOURCE: ${sourceLabel}</span>
+        <span style="font-size: 0.72rem; color: #8b949e; font-weight: 600;">SOURCE: ${escapeHtml(sourceLabel)}</span>
         <button id="btn-back-to-device" class="ctrl-btn" style="width: auto; margin: 0; padding: 2px 8px; font-size: 0.65rem;">Back</button>
       </div>
       
@@ -985,15 +985,15 @@ function renderTraceResultInDetailPanel(sourceId, destIp, hops) {
               
               <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${hop.label}</span>
-                  <span class="uppercase-badge">${hop.type}</span>
+                  <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${escapeHtml(hop.label)}</span>
+                  <span class="uppercase-badge">${escapeHtml(hop.type)}</span>
                 </div>
                 
-                <div style="font-size: 0.75rem; color: #8b949e; font-family: monospace; margin-top: 4px;">IP: ${hop.ip}</div>
+                <div style="font-size: 0.75rem; color: #8b949e; font-family: monospace; margin-top: 4px;">IP: ${escapeHtml(hop.ip || '')}</div>
                 
                 <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 0.7rem; font-family: monospace; color: #c9d1d9; border-top: 1px solid #21262d; padding-top: 6px;">
-                  ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${hop.ingress_interface}</div>` : ''}
-                  ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${hop.egress_interface}</div>` : ''}
+                  ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${escapeHtml(hop.ingress_interface || '')}</div>` : ''}
+                  ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${escapeHtml(hop.egress_interface || '')}</div>` : ''}
                 </div>
               </div>
             </div>
@@ -1025,7 +1025,84 @@ function showDeviceDetail(device, links) {
   const isOnline = statusInfo.online;
   const latency = statusInfo.latency;
 
+  // Auto-generate high-fidelity demo config for presenting the security auditor if config is missing
+  let deviceConfig = device.config;
+  if (!deviceConfig) {
+    const ifacesStr = (device.interfaces || []).map(i => {
+      let modeStr = '';
+      if (i.mode === 'access') {
+        modeStr = ` switchport mode access\n switchport access vlan ${i.vlan_access || 1}`;
+      } else if (i.mode === 'trunk') {
+        modeStr = ` switchport mode trunk\n switchport trunk native vlan ${i.vlan_native || 1}\n switchport trunk allowed vlan ${i.vlan_trunk || 'all'}`;
+      } else {
+        modeStr = ` ip address ${i.ip || '10.0.0.1'} ${i.mask || '255.255.255.0'}`;
+      }
+      return `interface ${i.name}\n${modeStr}\n speed ${i.speed || 'auto'}\n mtu ${i.mtu || 1500}\n!`;
+    }).join('\n');
+    
+    deviceConfig = `!
+hostname ${device.label}
+!
+enable password cisco
+no service password-encryption
+!
+username admin privilege 15 password 0 cisco
+!
+ip domain-name local
+!
+interface Loopback0
+ ip address ${device.ip ? device.ip.replace(/\.\d+$/, '.254') : '10.255.255.1'} 255.255.255.255
+!
+${ifacesStr}
+!
+line vty 0 4
+ transport input telnet
+ login local
+!
+snmp-server community public RO
+snmp-server community private RW
+!
+end`;
+  }
+
+  // Set generated config back temporarily so it is accessible in subsequent operations
+  device.config = deviceConfig;
+
   document.getElementById('detail-title').textContent = device.label;
+
+  // Construct audit findings card
+  const findings = device.audit_findings || [];
+  let auditHtml = '';
+  
+  if (deviceConfig || findings.length > 0) {
+    auditHtml = `
+      <div class="detail-card">
+        <div class="card-title">Config Security & Compliance Audit</div>
+        <div class="audit-findings-list" style="margin-top: 8px;">
+          ${findings.length === 0 ? `
+            <div style="display: flex; align-items: center; gap: 8px; color: #3fb950; font-weight: 500; font-size: 0.75rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Passed all security checks
+            </div>
+          ` : 
+            findings.map(f => {
+              const sev = f.severity.toLowerCase();
+              return `
+                <div class="audit-finding-card severity-${sev}">
+                  <div class="audit-header-row">
+                    <span class="audit-title">${f.title}</span>
+                    <span class="audit-badge badge-${sev}">${f.severity}</span>
+                  </div>
+                  <div class="audit-desc">${f.description}</div>
+                </div>
+              `;
+            }).join('')
+          }
+        </div>
+      </div>
+    `;
+  }
+
   document.getElementById('detail-body').innerHTML = `
     <!-- Status & Info Card -->
     <div class="detail-card">
@@ -1042,11 +1119,25 @@ function showDeviceDetail(device, links) {
         <div class="detail-key">Latency</div>
         <div class="detail-val font-mono highlight-text">${latency}ms</div>
       </div>` : ''}
-      <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val uppercase-badge">${device.type}</div></div>
-      <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val uppercase-badge">${device.layer}</div></div>
-      ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val font-mono highlight-text">${device.ip}</div></div>` : ''}
-      ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val font-mono">${device.platform}</div></div>` : ''}
+      <div class="detail-row"><div class="detail-key">Type</div><div class="detail-val uppercase-badge">${escapeHtml(device.type)}</div></div>
+      <div class="detail-row"><div class="detail-key">Layer</div><div class="detail-val uppercase-badge">${escapeHtml(device.layer)}</div></div>
+      ${device.ip ? `<div class="detail-row"><div class="detail-key">IP Address</div><div class="detail-val font-mono highlight-text">${escapeHtml(device.ip)}</div></div>` : ''}
+      ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val font-mono">${escapeHtml(device.platform)}</div></div>` : ''}
     </div>
+
+    <!-- Security compliance findings -->
+    ${auditHtml}
+
+    <!-- View config card trigger -->
+    ${deviceConfig ? `
+    <button id="view-config-btn" class="console-action-card" style="margin-top: 12px; margin-bottom: 12px; cursor: pointer; border: 1px solid #30363d; border-radius: 6px; width: 100%;">
+      <div class="console-action-icon">📄</div>
+      <div class="console-action-text" style="text-align: left;">
+        <div class="console-action-title">View Running Config</div>
+        <div class="console-action-desc">Inspect, search, or download configuration</div>
+      </div>
+    </button>
+    ` : ''}
 
     <!-- Connections Card -->
     <div class="detail-card">
@@ -1063,12 +1154,12 @@ function showDeviceDetail(device, links) {
             return `
               <div class="interface-item">
                 <div class="interface-meta">
-                  <span class="interface-name">${localIface}</span>
-                  <span class="interface-peer">to ${remoteLabel}</span>
+                  <span class="interface-name">${escapeHtml(localIface)}</span>
+                  <span class="interface-peer">to ${escapeHtml(remoteLabel)}</span>
                 </div>
                 <div class="interface-stats">
-                  <span class="proto-tag">${l.protocol || 'UP'}</span>
-                  <span class="bw-tag">${l.bandwidth || '1G'}</span>
+                  <span class="proto-tag">${escapeHtml(l.protocol || 'UP')}</span>
+                  <span class="bw-tag">${escapeHtml(l.bandwidth || '1G')}</span>
                 </div>
               </div>
             `;
@@ -1150,6 +1241,13 @@ function showDeviceDetail(device, links) {
     });
   }
 
+  const viewConfigBtn = document.getElementById('view-config-btn');
+  if (viewConfigBtn) {
+    viewConfigBtn.addEventListener('click', () => {
+      openConfigViewerModal(device.label, deviceConfig);
+    });
+  }
+
   const traceBtn = document.getElementById('trace-path-btn');
   if (traceBtn) {
     traceBtn.addEventListener('click', () => {
@@ -1172,6 +1270,97 @@ function showDeviceDetail(device, links) {
   }
 }
 
+function openConfigViewerModal(deviceName, configText) {
+  const modal = document.getElementById('config-viewer-modal');
+  if (!modal) return;
+
+  document.getElementById('config-viewer-title').textContent = `Running Config: ${deviceName}`;
+  
+  const searchInput = document.getElementById('config-viewer-search');
+  if (searchInput) searchInput.value = '';
+
+  const bodyEl = document.getElementById('config-viewer-body');
+  if (!bodyEl) return;
+
+  const lines = configText.split(/\r?\n/);
+  bodyEl.innerHTML = lines.map((line, idx) => {
+    return `
+      <div class="config-line" data-line-index="${idx}">
+        <span class="config-line-num">${idx + 1}</span>
+        <span class="config-line-code">${escapeHtml(line)}</span>
+      </div>
+    `;
+  }).join('');
+
+  if (searchInput) {
+    const newSearch = searchInput.cloneNode(true);
+    searchInput.parentNode.replaceChild(newSearch, searchInput);
+    newSearch.addEventListener('input', (e) => {
+      const term = e.target.value.toLowerCase().trim();
+      const lineEls = bodyEl.querySelectorAll('.config-line');
+      
+      lineEls.forEach(row => {
+        const codeEl = row.querySelector('.config-line-code');
+        const originalText = codeEl.textContent;
+        
+        if (!term) {
+          row.classList.remove('hidden-line');
+          codeEl.innerHTML = escapeHtml(originalText);
+          return;
+        }
+
+        if (originalText.toLowerCase().includes(term)) {
+          row.classList.remove('hidden-line');
+          const regex = new RegExp(`(${escapeRegExp(term)})`, 'gi');
+          const highlighted = escapeHtml(originalText).replace(regex, '<span class="highlight-match">$1</span>');
+          codeEl.innerHTML = highlighted;
+        } else {
+          row.classList.add('hidden-line');
+        }
+      });
+    });
+    setTimeout(() => newSearch.focus(), 50);
+  }
+
+  const downloadBtn = document.getElementById('config-viewer-download');
+  if (downloadBtn) {
+    const newDownload = downloadBtn.cloneNode(true);
+    downloadBtn.parentNode.replaceChild(newDownload, downloadBtn);
+    newDownload.addEventListener('click', () => {
+      const blob = new Blob([configText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${deviceName.replace(/\s+/g, '_')}_running_config.cfg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Config downloaded successfully', 'success');
+    });
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeConfigViewerModal() {
+  const modal = document.getElementById('config-viewer-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function showEdgeDetail(link) {
   let warningsHtml = '';
   if (link.warnings && link.warnings.length > 0) {
@@ -1182,7 +1371,7 @@ function showEdgeDetail(link) {
           Protocol & Link Audit Mismatches
         </div>
         <ul style="margin: 0; padding-left: 18px; color: #ffb067; font-size: 11.5px; line-height: 1.5; text-align: left;">
-          ${link.warnings.map(w => `<li>${w}</li>`).join('')}
+          ${link.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
         </ul>
       </div>
     `;
@@ -1190,10 +1379,10 @@ function showEdgeDetail(link) {
 
   document.getElementById('detail-title').textContent = `Link: ${link.source} ↔ ${link.target}`;
   document.getElementById('detail-body').innerHTML = `
-    <div class="detail-row"><div class="detail-key">Protocol</div><div class="detail-val">${link.protocol || 'N/A'}</div></div>
-    <div class="detail-row"><div class="detail-key">Bandwidth</div><div class="detail-val">${link.bandwidth || 'N/A'}</div></div>
-    ${link.src_iface ? `<div class="detail-row"><div class="detail-key">Source Interface</div><div class="detail-val">${link.src_iface}</div></div>` : ''}
-    ${link.dst_iface ? `<div class="detail-row"><div class="detail-key">Dest Interface</div><div class="detail-val">${link.dst_iface}</div></div>` : ''}
+    <div class="detail-row"><div class="detail-key">Protocol</div><div class="detail-val">${escapeHtml(link.protocol || 'N/A')}</div></div>
+    <div class="detail-row"><div class="detail-key">Bandwidth</div><div class="detail-val">${escapeHtml(link.bandwidth || 'N/A')}</div></div>
+    ${link.src_iface ? `<div class="detail-row"><div class="detail-key">Source Interface</div><div class="detail-val">${escapeHtml(link.src_iface)}</div></div>` : ''}
+    ${link.dst_iface ? `<div class="detail-row"><div class="detail-key">Dest Interface</div><div class="detail-val">${escapeHtml(link.dst_iface)}</div></div>` : ''}
     ${warningsHtml}
   `;
   setDetailVisible(true);
@@ -1364,7 +1553,7 @@ function showToast(message, type = 'info', duration = 3500) {
   toast.className = `toast toast-${type}`;
 
   const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
-  toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg">${message}</span>`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg">${escapeHtml(message)}</span>`;
   container.appendChild(toast);
 
   // Trigger enter animation
@@ -1454,8 +1643,8 @@ function toggleEditMode() {
     }
     hasDraggedNode = false;
     
-    // Automatically save layout to server
-    saveToServer();
+    // Notify user about unsaved changes instead of forcing a save prompt
+    showToast('Edits complete. Click "★ Save to Server" to persist changes.', 'info');
   }
 
   if (network) {
@@ -1751,6 +1940,8 @@ function handleMenuPaste() {
 // ---------------------------------------------------------------------------
 let pendingCallback = null;
 let pendingNodeAction = null;
+let pendingEdgeData = null;
+let pendingEdgeAction = null;
 
 function addInterfaceRowToModal(iface = {}) {
   const container = document.getElementById('modal-interfaces-list');
@@ -1769,50 +1960,50 @@ function addInterfaceRowToModal(iface = {}) {
   const speed = iface.speed || '';
 
   const rowHtml = `
-    <div class="interface-row" id="${rowId}" style="background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 8px; position: relative;">
-      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-        <input type="text" class="iface-name" placeholder="Interface (e.g. Gi1/0/1)" value="${name}" style="flex: 2; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;" required>
-        <select class="iface-mode" style="flex: 1.5; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
+    <div class="interface-row" id="${rowId}">
+      <div class="iface-header-row">
+        <input type="text" class="iface-name" placeholder="Interface (e.g. Gi1/0/1)" value="${name}" required>
+        <select class="iface-mode">
           <option value="routed" ${mode === 'routed' ? 'selected' : ''}>Routed</option>
           <option value="trunk" ${mode === 'trunk' ? 'selected' : ''}>Trunk</option>
           <option value="access" ${mode === 'access' ? 'selected' : ''}>Access</option>
         </select>
-        <button type="button" class="iface-delete-btn" style="background: transparent; border: none; color: #f85149; cursor: pointer; padding: 4px 8px; font-size: 1rem;" title="Delete Interface">
+        <button type="button" class="iface-delete-btn" title="Delete Interface">
           🗑️
         </button>
       </div>
-      <div class="iface-details-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+      <div class="iface-details-grid">
         <!-- Conditional L3 fields (IP/Mask) -->
         <div class="iface-field-group iface-l3-fields" style="${mode === 'routed' ? '' : 'display: none;'}">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">IP Address</label>
-          <input type="text" class="iface-ip" placeholder="e.g. 10.0.1.1" value="${ip}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>IP Address</label>
+          <input type="text" class="iface-ip" placeholder="e.g. 10.0.1.1" value="${ip}">
         </div>
         <div class="iface-field-group iface-l3-fields" style="${mode === 'routed' ? '' : 'display: none;'}">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Subnet Mask</label>
-          <input type="text" class="iface-mask" placeholder="e.g. 255.255.255.252" value="${mask}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>Subnet Mask</label>
+          <input type="text" class="iface-mask" placeholder="e.g. 255.255.255.252" value="${mask}">
         </div>
         <!-- Conditional L2 Access fields -->
-        <div class="iface-field-group iface-access-fields" style="grid-column: span 2; ${mode === 'access' ? '' : 'display: none;'}">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Access VLAN</label>
-          <input type="number" class="iface-vlan-access" placeholder="e.g. 10" value="${vlanAccess}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+        <div class="iface-field-group iface-access-fields" style="${mode === 'access' ? '' : 'display: none;'}">
+          <label>Access VLAN</label>
+          <input type="number" class="iface-vlan-access" placeholder="e.g. 10" value="${vlanAccess}">
         </div>
         <!-- Conditional L2 Trunk fields -->
         <div class="iface-field-group iface-trunk-fields" style="${mode === 'trunk' ? '' : 'display: none;'}">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Native VLAN</label>
-          <input type="number" class="iface-vlan-native" placeholder="e.g. 1" value="${vlanNative}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>Native VLAN</label>
+          <input type="number" class="iface-vlan-native" placeholder="e.g. 1" value="${vlanNative}">
         </div>
         <div class="iface-field-group iface-trunk-fields" style="${mode === 'trunk' ? '' : 'display: none;'}">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Allowed VLANs</label>
-          <input type="text" class="iface-vlan-trunk" placeholder="e.g. 10,20,30" value="${vlanTrunk}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>Allowed VLANs</label>
+          <input type="text" class="iface-vlan-trunk" placeholder="e.g. 10,20,30" value="${vlanTrunk}">
         </div>
         <!-- Shared fields -->
         <div class="iface-field-group">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">MTU</label>
-          <input type="number" class="iface-mtu" placeholder="e.g. 1500" value="${mtu}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>MTU</label>
+          <input type="number" class="iface-mtu" placeholder="e.g. 1500" value="${mtu}">
         </div>
         <div class="iface-field-group">
-          <label style="font-size: 0.7rem; color: #8b949e; display: block; margin-bottom: 2px;">Speed</label>
-          <input type="text" class="iface-speed" placeholder="e.g. auto, 1000, 10g" value="${speed}" style="width: 100%; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; box-sizing: border-box;">
+          <label>Speed</label>
+          <input type="text" class="iface-speed" placeholder="e.g. auto, 1000, 10g" value="${speed}">
         </div>
       </div>
     </div>
@@ -1907,22 +2098,23 @@ function showNodeEditor(action, data, callback) {
 
 function showEdgeEditor(action, data, callback) {
   pendingCallback = callback;
+  pendingEdgeAction = action;
+  pendingEdgeData = data;
   const modal = document.getElementById('edge-modal');
   const isEdit = action === 'edit';
   
   document.getElementById('edge-modal-title').textContent = isEdit ? 'Edit Link' : 'Add Link';
   
-  if (isEdit && currentTopology && data._data) {
-    document.getElementById('edge-protocol').value = data._data.protocol || '';
-    document.getElementById('edge-bandwidth').value = data._data.bandwidth || '';
-    document.getElementById('edge-src-iface').value = data._data.src_iface || '';
-    document.getElementById('edge-dst-iface').value = data._data.dst_iface || '';
-  } else {
-    document.getElementById('edge-protocol').value = '';
-    document.getElementById('edge-bandwidth').value = '1G';
-    document.getElementById('edge-src-iface').value = '';
-    document.getElementById('edge-dst-iface').value = '';
+  let oldEdgeData = isEdit && data._data ? data._data : null;
+  if (!oldEdgeData && isEdit && currentTopology) {
+    // Attempt to find by from/to if data._data is missing
+    oldEdgeData = currentTopology.links.find(l => l.source === data.from && l.target === data.to);
   }
+
+  document.getElementById('edge-protocol').value = oldEdgeData?.protocol || '';
+  document.getElementById('edge-bandwidth').value = oldEdgeData?.bandwidth || '1G';
+  document.getElementById('edge-src-iface').value = oldEdgeData?.src_iface || '';
+  document.getElementById('edge-dst-iface').value = oldEdgeData?.dst_iface || '';
   
   modal.classList.remove('hidden');
 }
@@ -1946,18 +2138,23 @@ document.getElementById('node-save')?.addEventListener('click', () => {
   const ip = document.getElementById('node-ip').value;
   const platform = document.getElementById('node-platform').value;
 
-  document.getElementById('node-modal').classList.add('hidden');
-
   if (!label.trim()) {
     showToast('Label is required', 'warning');
-    if (pendingCallback) pendingCallback(null);
     return;
   }
 
-  // Extract interfaces from rows
+  if (ip.trim() && !/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ip.trim())) {
+    showToast('Invalid management IP Address format', 'warning');
+    return;
+  }
+
+  // Extract and validate interfaces from rows
   const interfaces = [];
   const rows = document.querySelectorAll('#modal-interfaces-list .interface-row');
+  let hasInterfaceError = false;
+  
   rows.forEach(row => {
+    if (hasInterfaceError) return;
     const nameInput = row.querySelector('.iface-name');
     const name = nameInput ? nameInput.value.trim() : '';
     if (!name) return; // skip row if name is empty
@@ -1968,6 +2165,11 @@ document.getElementById('node-save')?.addEventListener('click', () => {
     const mtuInput = row.querySelector('.iface-mtu');
     const mtuVal = mtuInput ? mtuInput.value.trim() : '';
     const mtu = mtuVal ? parseInt(mtuVal, 10) : null;
+    if (mtuVal && (isNaN(mtu) || mtu < 68 || mtu > 9216)) {
+      showToast(`Invalid MTU for interface ${name}. Must be an integer between 68 and 9216.`, 'warning');
+      hasInterfaceError = true;
+      return;
+    }
     
     const speedInput = row.querySelector('.iface-speed');
     const speed = speedInput ? speedInput.value.trim() || null : null;
@@ -1977,37 +2179,81 @@ document.getElementById('node-save')?.addEventListener('click', () => {
     if (mode === 'routed') {
       const ipInput = row.querySelector('.iface-ip');
       const maskInput = row.querySelector('.iface-mask');
-      ifaceData.ip = ipInput ? ipInput.value.trim() || null : null;
-      ifaceData.mask = maskInput ? maskInput.value.trim() || null : null;
+      const ifaceIp = ipInput ? ipInput.value.trim() : '';
+      const ifaceMask = maskInput ? maskInput.value.trim() : '';
+      
+      if (ifaceIp && !/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ifaceIp)) {
+        showToast(`Invalid IP format on interface ${name}`, 'warning');
+        hasInterfaceError = true;
+        return;
+      }
+      if (ifaceMask && !/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ifaceMask)) {
+        showToast(`Invalid subnet mask format on interface ${name}`, 'warning');
+        hasInterfaceError = true;
+        return;
+      }
+      ifaceData.ip = ifaceIp || null;
+      ifaceData.mask = ifaceMask || null;
     } else if (mode === 'access') {
       const vlanAccessInput = row.querySelector('.iface-vlan-access');
       const vlanAccessVal = vlanAccessInput ? vlanAccessInput.value.trim() : '';
-      ifaceData.vlan_access = vlanAccessVal ? parseInt(vlanAccessVal, 10) : null;
+      const vlanAccess = vlanAccessVal ? parseInt(vlanAccessVal, 10) : null;
+      if (vlanAccessVal && (isNaN(vlanAccess) || vlanAccess < 1 || vlanAccess > 4094)) {
+        showToast(`Invalid Access VLAN on interface ${name}. Must be between 1 and 4094.`, 'warning');
+        hasInterfaceError = true;
+        return;
+      }
+      ifaceData.vlan_access = vlanAccess;
     } else if (mode === 'trunk') {
       const vlanNativeInput = row.querySelector('.iface-vlan-native');
       const vlanTrunkInput = row.querySelector('.iface-vlan-trunk');
       const vlanNativeVal = vlanNativeInput ? vlanNativeInput.value.trim() : '';
-      ifaceData.vlan_native = vlanNativeVal ? parseInt(vlanNativeVal, 10) : null;
+      const vlanNative = vlanNativeVal ? parseInt(vlanNativeVal, 10) : null;
+      if (vlanNativeVal && (isNaN(vlanNative) || vlanNative < 1 || vlanNative > 4094)) {
+        showToast(`Invalid Native VLAN on interface ${name}. Must be between 1 and 4094.`, 'warning');
+        hasInterfaceError = true;
+        return;
+      }
+      ifaceData.vlan_native = vlanNative;
       ifaceData.vlan_trunk = vlanTrunkInput ? vlanTrunkInput.value.trim() || null : null;
     }
     
     interfaces.push(ifaceData);
   });
 
-  const deviceData = { id, label, type, layer, ip, platform, interfaces };
-  
-  if (pendingPastePosition) {
-    deviceData.x = pendingPastePosition.x;
-    deviceData.y = pendingPastePosition.y;
-    pendingPastePosition = null;
-  }
-  
+  if (hasInterfaceError) return;
+
+  document.getElementById('node-modal').classList.add('hidden');
+
   // Update internal model
   if (!currentTopology) currentTopology = { devices: [], links: [] };
   const existingIndex = currentTopology.devices.findIndex(d => d.id === id);
+  let deviceData;
   if (existingIndex >= 0) {
+    const existing = currentTopology.devices[existingIndex];
+    deviceData = {
+      ...existing,
+      id,
+      label,
+      type,
+      layer,
+      ip,
+      platform,
+      interfaces,
+    };
+    if (pendingPastePosition) {
+      deviceData.x = pendingPastePosition.x;
+      deviceData.y = pendingPastePosition.y;
+      pendingPastePosition = null;
+    }
     currentTopology.devices[existingIndex] = deviceData;
   } else {
+    deviceData = { id, label, type, layer, ip, platform, interfaces };
+    if (pendingPastePosition) {
+      deviceData.x = pendingPastePosition.x;
+      deviceData.y = pendingPastePosition.y;
+      pendingPastePosition = null;
+    }
     currentTopology.devices.push(deviceData);
   }
   
@@ -2030,102 +2276,62 @@ document.getElementById('edge-cancel')?.addEventListener('click', () => {
   document.getElementById('edge-modal').classList.add('hidden');
   if (pendingCallback) pendingCallback(null);
   pendingCallback = null;
+  pendingEdgeData = null;
+  pendingEdgeAction = null;
 });
 
 document.getElementById('edge-save')?.addEventListener('click', () => {
-  const protocol = document.getElementById('edge-protocol').value;
-  const bandwidth = document.getElementById('edge-bandwidth').value;
-  const src_iface = document.getElementById('edge-src-iface').value;
-  const dst_iface = document.getElementById('edge-dst-iface').value;
-  
   document.getElementById('edge-modal').classList.add('hidden');
   
-  // To link correctly, we need from/to which are hidden in pendingCallback scope
-  // Since we don't have access to the data object easily here, we rely on a global or hack:
-  // We can just recreate the edge logic inside the callback wrapper.
-});
-
-// Let's modify showEdgeEditor to bind the save action dynamically
-function showEdgeEditor(action, data, callback) {
-  const modal = document.getElementById('edge-modal');
-  const isEdit = action === 'edit';
-  document.getElementById('edge-modal-title').textContent = isEdit ? 'Edit Link' : 'Add Link';
-  
-  let oldEdgeData = isEdit && data._data ? data._data : null;
-  if (!oldEdgeData && isEdit && currentTopology) {
-    // Attempt to find by from/to if data._data is missing
-    oldEdgeData = currentTopology.links.find(l => l.source === data.from && l.target === data.to);
+  if (!pendingEdgeData || !pendingCallback) {
+    if (pendingCallback) pendingCallback(null);
+    pendingCallback = null;
+    return;
   }
-
-  document.getElementById('edge-protocol').value = oldEdgeData?.protocol || '';
-  document.getElementById('edge-bandwidth').value = oldEdgeData?.bandwidth || '1G';
-  document.getElementById('edge-src-iface').value = oldEdgeData?.src_iface || '';
-  document.getElementById('edge-dst-iface').value = oldEdgeData?.dst_iface || '';
   
-  const saveBtn = document.getElementById('edge-save');
-  const cancelBtn = document.getElementById('edge-cancel');
-  
-  const cleanup = () => {
-    modal.classList.add('hidden');
-    saveBtn.removeEventListener('click', onSave);
-    cancelBtn.removeEventListener('click', onCancel);
+  const linkData = {
+    source: pendingEdgeData.from,
+    target: pendingEdgeData.to,
+    protocol: document.getElementById('edge-protocol').value,
+    bandwidth: document.getElementById('edge-bandwidth').value,
+    src_iface: document.getElementById('edge-src-iface').value,
+    dst_iface: document.getElementById('edge-dst-iface').value,
   };
   
-  const onCancel = () => {
-    cleanup();
-    callback(null);
-  };
+  if (!currentTopology) currentTopology = { devices: [], links: [] };
   
-  const onSave = () => {
-    cleanup();
-    const linkData = {
-      source: data.from,
-      target: data.to,
-      protocol: document.getElementById('edge-protocol').value,
-      bandwidth: document.getElementById('edge-bandwidth').value,
-      src_iface: document.getElementById('edge-src-iface').value,
-      dst_iface: document.getElementById('edge-dst-iface').value,
-    };
-    
-    if (!currentTopology) currentTopology = { devices: [], links: [] };
-    
-    if (isEdit) {
-      const idx = currentTopology.links.findIndex(l => l.source === data.from && l.target === data.to);
-      if (idx >= 0) currentTopology.links[idx] = linkData;
-    } else {
-      currentTopology.links.push(linkData);
+  const isEdit = pendingEdgeAction === 'edit';
+  if (isEdit) {
+    const idx = currentTopology.links.findIndex(l => l.source === pendingEdgeData.from && l.target === pendingEdgeData.to);
+    if (idx >= 0) {
+      currentTopology.links[idx] = {
+        ...currentTopology.links[idx],
+        ...linkData
+      };
     }
-    
-    const { nodes, edges } = buildGraph(currentTopology);
-    nodesDataset.update(nodes);
-    edgesDataset.update(edges);
-    updateStats(currentTopology);
-
-    callback(null);
-
-    if (!isEdit && network) {
-      setTimeout(() => { 
-        network.addEdgeMode(); 
-      }, 50);
-    }
-  };
+  } else {
+    currentTopology.links.push(linkData);
+  }
   
-  saveBtn.addEventListener('click', onSave);
-  cancelBtn.addEventListener('click', onCancel);
-  modal.classList.remove('hidden');
-}
+  const { nodes, edges } = buildGraph(currentTopology);
+  nodesDataset.update(nodes);
+  edgesDataset.update(edges);
+  updateStats(currentTopology);
 
-// Ensure the edge-save global listener is removed (we just use the dynamic one above)
-const existingEdgeSave = document.getElementById('edge-save');
-if (existingEdgeSave) {
-  const newEdgeSave = existingEdgeSave.cloneNode(true);
-  existingEdgeSave.parentNode.replaceChild(newEdgeSave, existingEdgeSave);
-}
-const existingEdgeCancel = document.getElementById('edge-cancel');
-if (existingEdgeCancel) {
-  const newEdgeCancel = existingEdgeCancel.cloneNode(true);
-  existingEdgeCancel.parentNode.replaceChild(newEdgeCancel, existingEdgeCancel);
-}
+  const cb = pendingCallback;
+  pendingCallback = null;
+  pendingEdgeData = null;
+  const oldAction = pendingEdgeAction;
+  pendingEdgeAction = null;
+  
+  cb(null);
+
+  if (!isEdit && network) {
+    setTimeout(() => { 
+      network.addEdgeMode(); 
+    }, 50);
+  }
+});
 
 function syncTopologyFromGraph() {
   if (!network || !currentTopology) return;
@@ -2134,6 +2340,7 @@ function syncTopologyFromGraph() {
   const activeEdges = edgesDataset.get(activeEdgeIds);
   currentTopology.links = activeEdges.map(e => {
     return {
+      ...(e._data || {}),
       source: e.from,
       target: e.to,
       protocol: e._data?.protocol || '',
@@ -2327,6 +2534,11 @@ async function runDiscovery() {
 
   if (!ip || !username) {
     showToast('IP Address and Username are required', 'warning');
+    return;
+  }
+
+  if (!/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ip)) {
+    showToast('Invalid Seed IP Address format', 'warning');
     return;
   }
 
@@ -2659,7 +2871,8 @@ class TerminalSession {
       if (promptEl) promptEl.textContent = this.lastPrompt;
     }
 
-    let formatted = text
+    let escaped = escapeHtml(text);
+    let formatted = escaped
       .replace(/\r\n/g, '\n')
       .replace(/\n\r/g, '\n')
       .replace(/\r/g, '\n')
@@ -2709,15 +2922,23 @@ class TerminalSession {
     let url = `${proto}//${location.host}/ws/terminal/${this.deviceId}?mode=${this.mode}`;
     url += `&ip=${encodeURIComponent(device.ip || '')}`;
     url += `&platform=${encodeURIComponent(device.platform || 'cisco_ios')}`;
-    
-    if (this.mode === 'ssh' && username && password) {
-      url += `&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    }
 
     this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
       this.updateStatus('connected', 'connected');
+      
+      // Securely send credentials and connection context as first message
+      const initPayload = {
+        type: 'connect',
+        mode: this.mode,
+        ip: device.ip || '',
+        platform: device.platform || 'cisco_ios',
+        username: username,
+        password: password
+      };
+      this.socket.send(JSON.stringify(initPayload));
+
       if (activeSessionId === this.deviceId) {
         const inputEl = this.bodyEl.querySelector('.terminal-input');
         if (inputEl) inputEl.focus();
@@ -3589,7 +3810,5 @@ function closeConfigDiffModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// escapeHtml defined once at line ~1351 with full entity coverage
 

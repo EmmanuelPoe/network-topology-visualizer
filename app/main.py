@@ -6,9 +6,11 @@ import asyncio
 import json
 import os
 import logging
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from pathlib import Path
+from collections import deque
 
 import yaml
 from fastapi import (
@@ -41,10 +43,46 @@ except ImportError:
     NETMIKO_AVAILABLE = False
     logger.warning("Netmiko not available. Real SSH console sessions will be disabled.")
 
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Lifespan events
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load default layout into manager.latest_topology on startup to seed the poller
+    try:
+        if SAMPLE_PATH.exists():
+            try:
+                raw = json.loads(SAMPLE_PATH.read_text())
+                manager.latest_topology = parse_topology(raw)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Failed to load sample topology on startup: {e}")
+    poller.start()
+    yield
+    await poller.stop()
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Network Topology Visualizer")
+app = FastAPI(title="Network Topology Visualizer", lifespan=lifespan)
+
+# CORS — configurable via CORS_ORIGINS env variable (comma-separated).
+# Defaults to same-origin ("*") for development convenience.
+from fastapi.middleware.cors import CORSMiddleware
+
+_cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount(
     "/static",
     StaticFiles(directory=str(Path(__file__).parent.parent / "static")),
@@ -58,7 +96,7 @@ SAMPLE_PATH = Path(__file__).parent.parent / "sample" / "topology.json"
 API_KEY: str | None = os.getenv("TOPOLOGY_API_KEY")
 
 # Thread pool for blocking NetworkX computations
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=16)
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -87,6 +125,7 @@ class Device(BaseModel):
     platform: Optional[str] = None
     config: Optional[str] = None
     interfaces: Optional[list[DeviceInterface]] = None
+    audit_findings: Optional[list[dict]] = None
     x: Optional[float] = None
     y: Optional[float] = None
 
@@ -199,24 +238,7 @@ manager = ConnectionManager()
 poller = LivePoller(manager)
 
 
-@app.on_event("startup")
-async def startup_event():
-    # Load default layout into manager.latest_topology on startup to seed the poller
-    try:
-        if SAMPLE_PATH.exists():
-            try:
-                raw = json.loads(SAMPLE_PATH.read_text())
-                manager.latest_topology = parse_topology(raw)
-            except Exception:
-                pass
-    except Exception as e:
-        logger.error(f"Failed to load sample topology on startup: {e}")
-    poller.start()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await poller.stop()
+# (events migrated to lifespan context manager)
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +287,14 @@ async def get_sample() -> JSONResponse:
 
 @app.post("/api/upload")
 async def upload_topology(file: UploadFile = File(...)) -> JSONResponse:
+    # Enforce a 50 MB file size limit to prevent memory exhaustion
+    max_size = 50 * 1024 * 1024  # 50 MB
     content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum upload size is {max_size // (1024 * 1024)} MB.",
+        )
     try:
         if file.filename.endswith(".zip"):
             from app.config_parser import ConfigTopologyParser
@@ -439,12 +468,26 @@ async def rename_layout(filename: str, new_name: str) -> JSONResponse:
             raise HTTPException(status_code=404, detail="Layout not found")
 
         # Sanitize new name
-        clean_new_name = "".join(
-            [c for c in new_name if c.isalnum() or c in " _-"]
+        suffix = ".json"
+        name_lower = new_name.lower()
+        if name_lower.endswith(".json"):
+            base_name = new_name[:-5]
+        elif name_lower.endswith(".yaml"):
+            base_name = new_name[:-5]
+            suffix = ".yaml"
+        elif name_lower.endswith(".yml"):
+            base_name = new_name[:-4]
+            suffix = ".yml"
+        else:
+            base_name = new_name
+
+        clean_base = "".join(
+            [c for c in base_name if c.isalnum() or c in " _-"]
         ).strip()
-        clean_new_name = clean_new_name.lower().replace(" ", "_")
-        if not clean_new_name.endswith(".json"):
-            clean_new_name += ".json"
+        clean_base = clean_base.lower().replace(" ", "_")
+        if not clean_base:
+            clean_base = "layout"
+        clean_new_name = f"{clean_base}{suffix}"
 
         new_path = sample_dir / clean_new_name
         if not new_path.resolve().is_relative_to(sample_dir.resolve()):
@@ -469,11 +512,26 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
     try:
         sample_dir = Path(__file__).parent.parent / "sample"
         if name:
-            safe_name = "".join([c for c in name if c.isalnum() or c in " _-"]).strip()
-            safe_name = safe_name.lower().replace(" ", "_")
-            if not safe_name.endswith(".json"):
-                safe_name += ".json"
-            save_path = sample_dir / safe_name
+            suffix = ".json"
+            name_lower = name.lower()
+            if name_lower.endswith(".json"):
+                base_name = name[:-5]
+            elif name_lower.endswith(".yaml"):
+                base_name = name[:-5]
+                suffix = ".yaml"
+            elif name_lower.endswith(".yml"):
+                base_name = name[:-4]
+                suffix = ".yml"
+            else:
+                base_name = name
+
+            safe_base = "".join(
+                [c for c in base_name if c.isalnum() or c in " _-"]
+            ).strip()
+            safe_base = safe_base.lower().replace(" ", "_")
+            if not safe_base:
+                safe_base = "layout"
+            save_path = sample_dir / f"{safe_base}{suffix}"
         else:
             save_path = sample_dir / "topology.json"
 
@@ -491,6 +549,13 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
         ts = int(time.time())
         backup_path = backup_dir / f"topology_{ts}.json"
         backup_path.write_text(json.dumps(data, indent=2))
+
+        # Prune old backups — keep only the 50 most recent
+        max_backups = 50
+        all_backups = sorted(backup_dir.glob("topology_*.json"), key=lambda p: p.stat().st_mtime)
+        if len(all_backups) > max_backups:
+            for old in all_backups[: len(all_backups) - max_backups]:
+                old.unlink(missing_ok=True)
 
         manager.latest_topology = data
         await manager.broadcast(data)
@@ -740,6 +805,29 @@ async def list_backups() -> JSONResponse:
         raise HTTPException(status_code=500, detail=f"Failed to list backups: {exc}")
 
 
+@app.get("/api/layouts/backups/{filename}")
+async def get_backup_layout(filename: str) -> JSONResponse:
+    try:
+        backup_dir = Path(__file__).parent.parent / "sample" / "backups"
+        safe_path = (backup_dir / filename).resolve()
+        if not safe_path.is_relative_to(backup_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        if not safe_path.exists():
+            raise HTTPException(status_code=404, detail="Backup layout not found")
+
+        content = safe_path.read_text()
+        raw = json.loads(content)
+        parsed = parse_topology(raw)
+        return JSONResponse(parsed)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load backup layout: {exc}"
+        )
+
+
 @app.get("/api/backups/diff")
 async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONResponse:
     import difflib
@@ -751,8 +839,7 @@ async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONRespons
         # Resolve p1
         if (
             file1 == "topology.json"
-            or "/" not in file1
-            and not file1.startswith("topology_")
+            or ("/" not in file1 and not file1.startswith("topology_"))
         ):
             p1 = (sample_dir / file1).resolve()
             if not p1.is_relative_to(sample_dir.resolve()):
@@ -765,8 +852,7 @@ async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONRespons
         # Resolve p2
         if (
             file2 == "topology.json"
-            or "/" not in file2
-            and not file2.startswith("topology_")
+            or ("/" not in file2 and not file2.startswith("topology_"))
         ):
             p2 = (sample_dir / file2).resolve()
             if not p2.is_relative_to(sample_dir.resolve()):
@@ -874,10 +960,10 @@ def find_path_python(data: dict, start: str, end: str) -> list[str] | None:
     if start not in adj or end not in adj:
         return None
 
-    queue = [[start]]
+    queue = deque([[start]])
     visited = {start}
     while queue:
-        path = queue.pop(0)
+        path = queue.popleft()
         node = path[-1]
         if node == end:
             return path
@@ -1108,7 +1194,7 @@ class MockTerminalSession:
             if (
                 d.get("ip") == target
                 or d.get("id") == target
-                or d.get("label").lower() == target.lower()
+                or (d.get("label") or "").lower() == target.lower()
             ):
                 target_device = d
                 break
@@ -1140,7 +1226,7 @@ class MockTerminalSession:
             if (
                 d.get("ip") == target
                 or d.get("id") == target
-                or d.get("label").lower() == target.lower()
+                or (d.get("label") or "").lower() == target.lower()
             ):
                 target_device = d
                 break
@@ -1187,6 +1273,24 @@ async def ws_terminal(
     password: Optional[str] = None,
 ) -> None:
     await websocket.accept()
+
+    # Wait for secure initialization connect packet
+    try:
+        init_packet_str = await websocket.receive_text()
+        init_packet = json.loads(init_packet_str)
+        if isinstance(init_packet, dict) and init_packet.get("type") == "connect":
+            username = init_packet.get("username") or username
+            password = init_packet.get("password") or password
+            if "ip" in init_packet:
+                ip = init_packet.get("ip")
+            if "platform" in init_packet:
+                platform = init_packet.get("platform")
+            if "mode" in init_packet:
+                mode = init_packet.get("mode")
+    except Exception as exc:
+        logger.warning(
+            f"Did not receive secure connect payload: {exc}. Using query parameters."
+        )
 
     # Load current topology to hydrate mock discovery values
     if manager.latest_topology is not None:
@@ -1474,14 +1578,33 @@ async def export_file(
     Echo endpoint to bypass strict browser (Safari) local Blob download policies.
     Expects raw text for JSON/SVG, and a Data URI for PNG.
     """
+    # Whitelist allowed content types to prevent serving arbitrary HTML
+    allowed_types = {
+        "application/json",
+        "image/png",
+        "image/svg+xml",
+    }
+    if content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported content type. Allowed: {', '.join(sorted(allowed_types))}",
+        )
+
     if content.startswith("data:image/png;base64,"):
         b64_str = content.split(",", 1)[1]
         data = base64.b64decode(b64_str)
     else:
         data = content.encode("utf-8")
 
+    # Sanitize filename to prevent header injection via " or CRLF
+    import re as _re
+
+    safe_filename = _re.sub(r'[^\w._-]', '_', filename)
+    if not safe_filename:
+        safe_filename = "export"
+
     return Response(
         content=data,
         media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
     )

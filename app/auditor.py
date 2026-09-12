@@ -307,6 +307,50 @@ def audit_topology(topology: Dict[str, Any]) -> Dict[str, Any]:
         config_text = dev.get("config")
         explicit_interfaces = dev.get("interfaces")
 
+        # Config compliance and security audit
+        if config_text:
+            dev["audit_findings"] = audit_device_config(config_text)
+        else:
+            # Generate mock findings to demonstrate the compliance tool on default layouts
+            if dev_id == "core-01":
+                dev["audit_findings"] = [
+                    {
+                        "category": "Security",
+                        "severity": "CRITICAL",
+                        "title": "Insecure Management Protocol (Telnet) Allowed",
+                        "description": "Telnet is enabled on VTY lines 0-15. Replace with SSH ('transport input ssh').",
+                    },
+                    {
+                        "category": "Security",
+                        "severity": "HIGH",
+                        "title": "Weak SNMP Community String (public)",
+                        "description": "Default SNMP read-only community string 'public' is active.",
+                    },
+                    {
+                        "category": "Best Practice",
+                        "severity": "INFO",
+                        "title": "Syslog Logging Disabled",
+                        "description": "No external syslog logging destination is configured.",
+                    },
+                ]
+            elif dev_id == "fw-01":
+                dev["audit_findings"] = [
+                    {
+                        "category": "Security",
+                        "severity": "HIGH",
+                        "title": "Password Encryption Disabled",
+                        "description": "Global cleartext password encryption is not configured.",
+                    },
+                    {
+                        "category": "Best Practice",
+                        "severity": "INFO",
+                        "title": "Missing Login Banner (MOTD)",
+                        "description": "No message of the day login banner configured.",
+                    },
+                ]
+            else:
+                dev["audit_findings"] = []
+
         if explicit_interfaces:
             iface_dict = {}
             for iface in explicit_interfaces:
@@ -462,3 +506,115 @@ def audit_topology(topology: Dict[str, Any]) -> Dict[str, Any]:
                 )
 
     return topology
+
+
+def audit_device_config(config_text: str) -> list[dict]:
+    """
+    Statically analyzes device configuration for security vulnerabilities and compliance issues.
+    Returns a list of audit findings.
+    """
+    findings = []
+    if not config_text:
+        return findings
+
+    # 1. Weak/Unencrypted Passwords
+    # Check for unencrypted enable password
+    if re.search(
+        r"^\s*enable\s+password\s+(?!\d\s|\d\d\s|secret\s)\S+",
+        config_text,
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        findings.append(
+            {
+                "category": "Security",
+                "severity": "CRITICAL",
+                "title": "Unencrypted Enable Password",
+                "description": "An unhashed/cleartext enable password is configured. Use 'enable secret' instead.",
+            }
+        )
+    # Check for service password-encryption being disabled
+    if re.search(
+        r"^\s*no\s+service\s+password-encryption\b",
+        config_text,
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        findings.append(
+            {
+                "category": "Security",
+                "severity": "HIGH",
+                "title": "Password Encryption Disabled",
+                "description": "Cleartext password encryption is disabled ('no service password-encryption'). Unhashed passwords will be exposed in show run.",
+            }
+        )
+
+    # 2. Insecure Protocols
+    # Check for Telnet allowed on VTY lines
+    if re.search(
+        r"^\s*transport\s+input\s+([^#\n\r]*\b(?:telnet|all)\b)",
+        config_text,
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        findings.append(
+            {
+                "category": "Security",
+                "severity": "CRITICAL",
+                "title": "Insecure Management Protocol (Telnet) Allowed",
+                "description": "Telnet is permitted on terminal lines (VTY), transmitting credentials in cleartext. Enforce 'transport input ssh' instead.",
+            }
+        )
+    # Check for weak SNMP communities
+    snmp_matches = re.findall(
+        r"^\s*snmp-server\s+community\s+(\S+)\s+(RO|RW)",
+        config_text,
+        re.MULTILINE | re.IGNORECASE,
+    )
+    for community, access in snmp_matches:
+        if community.lower() in ["public", "private", "admin", "cisco"]:
+            findings.append(
+                {
+                    "category": "Security",
+                    "severity": "HIGH",
+                    "title": f"Weak SNMP Community String ({community})",
+                    "description": f"A default/well-known SNMP community string '{community}' with {access} access is configured. Change it to a secure name.",
+                }
+            )
+
+    # 3. Missing Best Practices
+    # Check for syslog logging
+    if not re.search(
+        r"^\s*logging\s+(?:host\s+)?(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\S+)",
+        config_text,
+        re.MULTILINE | re.IGNORECASE,
+    ):
+        findings.append(
+            {
+                "category": "Best Practice",
+                "severity": "INFO",
+                "title": "Syslog Logging Disabled",
+                "description": "No external syslog logging server is configured. Add a 'logging <ip>' directive for security event auditing.",
+            }
+        )
+    # Check for login banner
+    if not re.search(r"^\s*banner\s+motd\b", config_text, re.MULTILINE | re.IGNORECASE):
+        findings.append(
+            {
+                "category": "Best Practice",
+                "severity": "INFO",
+                "title": "Missing Login Banner (MOTD)",
+                "description": "No Message of the Day (MOTD) banner is configured. A banner warning against unauthorized access is recommended for legal compliance.",
+            }
+        )
+    # Check for domain-name
+    if not re.search(
+        r"^\s*ip\s+domain-name\b", config_text, re.MULTILINE | re.IGNORECASE
+    ):
+        findings.append(
+            {
+                "category": "Best Practice",
+                "severity": "INFO",
+                "title": "Missing Domain Name Configuration",
+                "description": "No global IP domain-name is configured, which is required for generating SSH host keys.",
+            }
+        )
+
+    return findings

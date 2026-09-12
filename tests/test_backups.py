@@ -106,3 +106,77 @@ def test_save_and_list_backups():
     assert "diff" in diff_data_active
     assert "-hostname Core-1" in diff_data_active["diff"]
     assert "+hostname Core-1-drifted" in diff_data_active["diff"]
+
+
+def test_get_backup_layout():
+    payload = {
+        "devices": [
+            {
+                "id": "sw-1",
+                "label": "SW-1",
+                "type": "switch",
+                "layer": "access",
+                "ip": "10.0.0.5",
+            }
+        ],
+        "links": [],
+    }
+    response = client.post("/api/save", json=payload)
+    assert response.status_code == 200
+
+    response_list = client.get("/api/backups")
+    assert response_list.status_code == 200
+    data = response_list.json()
+    assert len(data["backups"]) >= 1
+    filename = data["backups"][0]["filename"]
+
+    response_layout = client.get(f"/api/layouts/backups/{filename}")
+    assert response_layout.status_code == 200
+    layout_data = response_layout.json()
+    assert "devices" in layout_data
+    assert layout_data["devices"][0]["id"] == "sw-1"
+
+    # Directory traversal test
+    response_bad = client.get("/api/layouts/backups/..%2Ftopology.json")
+    assert response_bad.status_code in (400, 404)
+
+
+def test_filename_sanitization():
+    payload = {
+        "devices": [
+            {
+                "id": "sw-1",
+                "label": "SW-1",
+                "type": "switch",
+                "layer": "access",
+                "ip": "10.0.0.5",
+            }
+        ],
+        "links": [],
+    }
+    # 1. Test save with .json extension in name query parameter
+    response = client.post("/api/save?name=my_test_layout.json", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "my_test_layout.json"
+
+    # Verify file exists on disk
+    sample_dir = Path(__file__).parent.parent / "sample"
+    file_path = sample_dir / "my_test_layout.json"
+    assert file_path.exists()
+
+    # 2. Test rename preserving the extension
+    response_rename = client.patch(
+        "/api/layouts/my_test_layout.json?new_name=renamed_test_layout.json"
+    )
+    assert response_rename.status_code == 200
+    rename_data = response_rename.json()
+    assert rename_data["filename"] == "renamed_test_layout.json"
+
+    renamed_path = sample_dir / "renamed_test_layout.json"
+    assert renamed_path.exists()
+    assert not file_path.exists()
+
+    # Clean up test files
+    if renamed_path.exists():
+        renamed_path.unlink()

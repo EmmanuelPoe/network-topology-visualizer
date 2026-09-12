@@ -1272,3 +1272,244 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* ============================================================
+   Interface Editing Modal Styles
+   ============================================================ */
+.interface-row {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.iface-header-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.iface-header-row .iface-name {
+  flex: 2;
+  padding: 6px 8px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+}
+
+.iface-header-row .iface-mode {
+  flex: 1.5;
+  padding: 6px 8px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+}
+
+.iface-header-row .iface-delete-btn {
+  background: transparent;
+  border: none;
+  color: #f85149;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 1rem;
+}
+
+.iface-header-row .iface-delete-btn:hover {
+  color: #ff7b72;
+}
+
+.iface-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.iface-field-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.iface-field-group label {
+  font-size: 0.7rem !important;
+  color: #8b949e !important;
+  display: block !important;
+  margin-bottom: 2px !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+}
+
+.iface-field-group input {
+  width: 100%;
+  padding: 6px 8px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  box-sizing: border-box;
+}
+
+.iface-field-group input:focus {
+  border-color: #388bfd;
+}
+
+.iface-access-fields {
+  grid-column: span 2;
+}
+
+/* Premium Layout & Control Overrides */
+.premium-select-layout {
+  height: 31px;
+  padding: 4px 10px;
+  cursor: pointer;
+  outline: none;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-size: 0.82rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.premium-select-layout:hover {
+  background: #30363d;
+  border-color: #484f58;
+}
+
+.premium-select-overlay {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 4px 10px;
+  cursor: pointer;
+  outline: none;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-size: 0.82rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.premium-select-overlay:hover {
+  background: #30363d;
+  border-color: #484f58;
+}
+
+/* ============================================================
+   Configuration Viewer & Auditor Styles
+   ============================================================ */
+.config-line {
+  display: flex;
+  line-height: 1.4;
+  padding: 0 4px;
+}
+
+.config-line:hover {
+  background: #161b22;
+}
+
+.config-line.hidden-line {
+  display: none !important;
+}
+
+.config-line-num {
+  width: 40px;
+  min-width: 40px;
+  color: #484f58;
+  text-align: right;
+  padding-right: 12px;
+  border-right: 1px solid #21262d;
+  margin-right: 12px;
+  user-select: none;
+}
+
+.config-line-code {
+  color: #c9d1d9;
+  white-space: pre;
+}
+
+.config-line-code.highlight-match {
+  background: rgba(242, 199, 68, 0.25);
+  color: #f0f6fc;
+  border-radius: 2px;
+}
+
+.audit-findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audit-finding-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  text-align: left;
+}
+
+.audit-finding-card.severity-critical {
+  border-left: 4px solid #f85149;
+}
+
+.audit-finding-card.severity-high {
+  border-left: 4px solid #ff9f43;
+}
+
+.audit-finding-card.severity-info {
+  border-left: 4px solid #58a6ff;
+}
+
+.audit-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.audit-title {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: #c9d1d9;
+}
+
+.audit-desc {
+  font-size: 0.72rem;
+  color: #8b949e;
+  line-height: 1.35;
+}
+
+.audit-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.audit-badge.badge-critical {
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  color: #ff7b72;
+}
+
+.audit-badge.badge-high {
+  background: rgba(255, 159, 67, 0.15);
+  border: 1px solid rgba(255, 159, 67, 0.3);
+  color: #ff9f43;
+}
+
+.audit-badge.badge-info {
+  background: rgba(56, 139, 253, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.3);
+  color: #58a6ff;
+}
+

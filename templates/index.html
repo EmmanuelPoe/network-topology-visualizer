@@ -34,7 +34,7 @@
           <input type="file" id="file-upload" accept=".json,.yaml,.yml,.zip" onchange="uploadTopology(event)" hidden>
         </label>
         <button class="action-btn" onclick="openDiscoverModal()" title="Discover Network Topology">&#128269; Discover</button>
-        <select id="select-server-layout" class="action-btn" onchange="loadServerLayout(this.value)" style="height: 31px; padding: 4px 10px; cursor: pointer; outline: none; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;">
+        <select id="select-server-layout" class="premium-select-layout" onchange="loadServerLayout(this.value)">
           <option value="">-- Load Layout --</option>
         </select>
         <button class="action-btn delete-btn" onclick="deleteCurrentLayout()" id="btn-delete-layout" disabled title="Delete selected layout from server">&#10006; Delete</button>
@@ -51,10 +51,10 @@
       </div>
     </div>
   </header>
-
+ 
   <div class="app-body">
     <div class="controls">
-
+ 
       <div class="control-section">
         <p class="control-label">Layout Mode</p>
         <div class="segmented-control" id="layout-segmented-control">
@@ -63,7 +63,7 @@
           <button class="segmented-btn active" id="btn-layout-hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
         </div>
       </div>
-
+ 
       <div class="control-section">
         <div class="slider-container">
           <div class="slider-header">
@@ -73,7 +73,7 @@
           <input type="range" id="zoom-slider" min="0.2" max="2.5" step="0.05" value="1.0" class="premium-slider" oninput="onZoomSliderChanged(this.value)">
         </div>
       </div>
-
+ 
       <div class="control-section">
         <div class="slider-container">
           <div class="slider-header">
@@ -83,7 +83,7 @@
           <input type="range" id="nodesize-slider" min="16" max="48" step="1" value="24" class="premium-slider" oninput="onNodeSizeSliderChanged(this.value)">
         </div>
       </div>
-
+ 
       <div class="control-section">
         <p class="control-label">Search</p>
         <div class="search-wrap">
@@ -99,7 +99,7 @@
         </div>
         <div id="search-results" class="search-results"></div>
       </div>
-
+ 
       <div class="control-section">
         <p class="control-label">Layer Filter</p>
         <button class="ctrl-btn layer-btn active" data-layer="all" onclick="setLayerFilter('all')">All Layers</button>
@@ -109,10 +109,10 @@
         <button class="ctrl-btn layer-btn" data-layer="distribution" onclick="setLayerFilter('distribution')">Distribution</button>
         <button class="ctrl-btn layer-btn" data-layer="access" onclick="setLayerFilter('access')">Access</button>
       </div>
-
+ 
       <div class="control-section">
         <p class="control-label">Logical Overlays</p>
-        <select id="select-overlay" class="premium-select" onchange="setOverlayView(this.value)" style="width: 100%; box-sizing: border-box; height: 32px; padding: 4px 10px; cursor: pointer; outline: none; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;">
+        <select id="select-overlay" class="premium-select-overlay" onchange="setOverlayView(this.value)">
           <option value="physical">Physical View (Default)</option>
           <option value="vlan-10">VLAN 10 (Access/AP)</option>
           <option value="vlan-20">VLAN 20 (User)</option>
@@ -238,7 +238,7 @@
         </div>
         <div class="form-group">
           <label for="node-ip">IP Address (Management)</label>
-          <input type="text" id="node-ip" placeholder="e.g. 10.0.0.1">
+          <input type="text" id="node-ip" placeholder="e.g. 10.0.0.1" pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" title="Enter a valid IPv4 address (e.g. 10.0.0.1)">
         </div>
         <div class="form-group">
           <label for="node-platform">Platform</label>
@@ -277,11 +277,11 @@
       </div>
       <div class="form-group">
         <label for="edge-src-iface">Source Interface</label>
-        <input type="text" id="edge-src-iface" placeholder="e.g. Gi1/0/1">
+        <input type="text" id="edge-src-iface" placeholder="e.g. Gi1/0/1" required>
       </div>
       <div class="form-group">
         <label for="edge-dst-iface">Dest Interface</label>
-        <input type="text" id="edge-dst-iface" placeholder="e.g. Gi1/0/2">
+        <input type="text" id="edge-dst-iface" placeholder="e.g. Gi1/0/2" required>
       </div>
       <div class="modal-actions">
         <button id="edge-cancel" class="ctrl-btn">Cancel</button>
@@ -302,7 +302,7 @@
       <h3 id="discover-modal-title">Discover Network</h3>
       <div class="form-group">
         <label for="discover-ip">Seed IP Address</label>
-        <input type="text" id="discover-ip" placeholder="e.g. 10.0.0.1">
+        <input type="text" id="discover-ip" placeholder="e.g. 10.0.0.1" pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$" title="Enter a valid IPv4 address (e.g. 10.0.0.1)" required>
       </div>
       <div class="form-group">
         <label for="discover-user">Username</label>
@@ -343,6 +343,23 @@
       <div id="config-diff-body" style="font-family: monospace; font-size: 0.82rem; background: #0d1117; color: #c9d1d9; padding: 12px; border: 1px solid #30363d; border-radius: 6px; overflow-x: auto; max-height: 400px; white-space: pre-wrap; margin-top: 12px;"></div>
       <div class="modal-actions" style="margin-top: 16px;">
         <button onclick="closeConfigDiffModal()" class="ctrl-btn active">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Running Config Viewer Modal -->
+  <div id="config-viewer-modal" class="modal-overlay hidden">
+    <div class="modal" style="max-width: 800px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;">
+      <h3 id="config-viewer-title">Running Configuration</h3>
+      <div style="display: flex; gap: 8px; margin-top: 12px; margin-bottom: 8px; flex-shrink: 0;">
+        <input type="text" id="config-viewer-search" placeholder="Search config..." style="flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 6px 12px; font-size: 0.82rem; outline: none;">
+        <button id="config-viewer-download" class="ctrl-btn active" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.82rem;">Download</button>
+      </div>
+      <div id="config-viewer-content-container" style="flex: 1; overflow: auto; border: 1px solid #30363d; border-radius: 6px; background: #0d1117; position: relative;">
+        <pre id="config-viewer-body" style="font-family: monospace; font-size: 0.82rem; color: #c9d1d9; padding: 12px; margin: 0; white-space: pre; overflow: visible; display: flex; flex-direction: column; gap: 1px;"></pre>
+      </div>
+      <div class="modal-actions" style="margin-top: 16px; flex-shrink: 0;">
+        <button onclick="closeConfigViewerModal()" class="ctrl-btn active">Close</button>
       </div>
     </div>
   </div>
