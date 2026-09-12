@@ -1,0 +1,18 @@
+{
+  "devices": [
+    {
+      "id": "sw-1",
+      "label": "SW-1 (Edited)",
+      "type": "switch",
+      "layer": "access",
+      "ip": "10.0.0.9",
+      "platform": null,
+      "config": null,
+      "interfaces": null,
+      "audit_findings": [],
+      "x": null,
+      "y": null
+    }
+  ],
+  "links": []
+}

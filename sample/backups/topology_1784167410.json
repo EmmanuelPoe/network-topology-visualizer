@@ -1,0 +1,24 @@
+{
+  "devices": [
+    {
+      "id": "sw-1",
+      "label": "SW-1",
+      "type": "switch",
+      "layer": "access",
+      "ip": "10.0.0.99",
+      "platform": null,
+      "config": "hostname SW-1-Test\ninterface GigabitEthernet1/0/1\n!",
+      "interfaces": null,
+      "audit_findings": [
+        {
+          "rule": "weak_password",
+          "severity": "warning",
+          "message": "Weak password detected"
+        }
+      ],
+      "x": null,
+      "y": null
+    }
+  ],
+  "links": []
+}
