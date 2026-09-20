@@ -10,8 +10,8 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def backup_restore_topology():
-    topology_path = Path(__file__).parent / "sample" / "topology.json"
-    backup_path = Path(__file__).parent / "sample" / "topology.json.bak"
+    topology_path = Path(__file__).parent.parent / "sample" / "topology.json"
+    backup_path = Path(__file__).parent.parent / "sample" / "topology.json.bak"
 
     # Back up the original file if it exists
     existed = topology_path.exists()

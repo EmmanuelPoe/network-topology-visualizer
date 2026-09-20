@@ -919,7 +919,7 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   position: absolute;
   top: 2px;
   left: 2px;
-  width: calc(50% - 2px);
+  width: calc(25% - 2px);
   height: calc(100% - 4px);
   background: #1f6feb;
   border-radius: 6px;
@@ -927,9 +927,17 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   z-index: 1;
 }
 
-/* Slide position for Hierarchical */
+/* Slide positions for layouts */
 .segmented-control.hierarchical-active .segmented-slider {
   transform: translateX(100%);
+}
+
+.segmented-control.circular-active .segmented-slider {
+  transform: translateX(200%);
+}
+
+.segmented-control.grid-active .segmented-slider {
+  transform: translateX(300%);
 }
 
 /* Range Slider Container */
@@ -1512,4 +1520,58 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   border: 1px solid rgba(56, 139, 253, 0.3);
   color: #58a6ff;
 }
+
+.audit-cis-badge {
+  font-size: 0.62rem;
+  font-family: monospace;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #79c0ff;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* Path Trace Modal Hop Cards */
+.trace-hop-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+}
+
+.trace-hop-card .hop-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #388bfd;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.trace-hop-card .hop-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.trace-hop-card .hop-name {
+  font-weight: 600;
+  color: #c9d1d9;
+}
+
+.trace-hop-card .hop-sub {
+  font-size: 0.7rem;
+  color: #8b949e;
+  font-family: monospace;
+}
+
 

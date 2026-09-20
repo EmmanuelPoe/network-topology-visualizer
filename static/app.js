@@ -88,6 +88,29 @@ function buildGraph(data) {
     };
   });
 
+  if (currentLayout === 'circular' && nodes.length > 0) {
+    const total = nodes.length;
+    const radius = Math.max(240, total * 45);
+    nodes.forEach((n, idx) => {
+      const angle = (2 * Math.PI * idx) / total;
+      n.x = Math.round(radius * Math.cos(angle));
+      n.y = Math.round(radius * Math.sin(angle));
+      n.fixed = true;
+    });
+  } else if (currentLayout === 'grid' && nodes.length > 0) {
+    const total = nodes.length;
+    const cols = Math.ceil(Math.sqrt(total));
+    const spacingX = 220;
+    const spacingY = 180;
+    nodes.forEach((n, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      n.x = Math.round((col - (cols - 1) / 2) * spacingX);
+      n.y = Math.round((row - (Math.ceil(total / cols) - 1) / 2) * spacingY);
+      n.fixed = true;
+    });
+  }
+
   const edges = data.links.map((l, i) => {
     let label = l.protocol || '';
     let edgeColor = '#30363d';
@@ -457,13 +480,20 @@ function updateSliderTrackFill(sliderId, val) {
 function updateLayoutToggleUI(layout) {
   const container = document.getElementById('layout-segmented-control');
   if (container) {
-    container.classList.toggle('hierarchical-active', layout === 'hierarchical');
+    container.classList.remove('hierarchical-active', 'circular-active', 'grid-active');
+    if (layout === 'hierarchical') container.classList.add('hierarchical-active');
+    else if (layout === 'circular') container.classList.add('circular-active');
+    else if (layout === 'grid') container.classList.add('grid-active');
   }
   const btnFree = document.getElementById('btn-layout-free');
   const btnHier = document.getElementById('btn-layout-hierarchical');
+  const btnCirc = document.getElementById('btn-layout-circular');
+  const btnGrid = document.getElementById('btn-layout-grid');
   if (btnFree && btnHier) {
     btnFree.classList.toggle('active', layout === 'free');
     btnHier.classList.toggle('active', layout === 'hierarchical');
+    if (btnCirc) btnCirc.classList.toggle('active', layout === 'circular');
+    if (btnGrid) btnGrid.classList.toggle('active', layout === 'grid');
   }
 }
 
@@ -1091,7 +1121,10 @@ end`;
                 <div class="audit-finding-card severity-${sev}">
                   <div class="audit-header-row">
                     <span class="audit-title">${f.title}</span>
-                    <span class="audit-badge badge-${sev}">${f.severity}</span>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                      ${f.cis_rule_id ? `<span class="audit-cis-badge">${f.cis_rule_id}</span>` : ''}
+                      <span class="audit-badge badge-${sev}">${f.severity}</span>
+                    </div>
                   </div>
                   <div class="audit-desc">${f.description}</div>
                 </div>
@@ -1499,7 +1532,94 @@ function enableExportButtons(enabled) {
   document.getElementById('btn-export-png').disabled = !enabled;
   document.getElementById('btn-export-svg').disabled = !enabled;
   document.getElementById('btn-export-json').disabled = !enabled;
+  const btnReport = document.getElementById('btn-export-report');
+  if (btnReport) btnReport.disabled = !enabled;
   document.getElementById('btn-save-server').disabled = !enabled;
+}
+
+function exportExecutiveReport(format = 'markdown') {
+  const url = `/api/export/report?format=${encodeURIComponent(format)}`;
+  window.open(url, '_blank');
+}
+
+function openPathTraceModal() {
+  if (!currentTopology || !currentTopology.devices || currentTopology.devices.length === 0) {
+    showToast('Please load a topology before running a path trace', 'warning');
+    return;
+  }
+  const selectEl = document.getElementById('trace-source-select');
+  if (selectEl) {
+    selectEl.innerHTML = currentTopology.devices.map(d => {
+      const layerName = (d.layer || 'N/A').toUpperCase();
+      return `<option value="${d.id}">${d.label} (${d.ip || 'No IP'}) - ${layerName}</option>`;
+    }).join('');
+    if (selectedNodeId) {
+      selectEl.value = selectedNodeId;
+    }
+  }
+  const destInput = document.getElementById('trace-dest-ip');
+  if (destInput) destInput.value = '';
+  
+  const hopsContainer = document.getElementById('trace-hops-container');
+  if (hopsContainer) hopsContainer.style.display = 'none';
+
+  const modal = document.getElementById('path-trace-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closePathTraceModal() {
+  const modal = document.getElementById('path-trace-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function runModalPathTrace() {
+  const sourceId = document.getElementById('trace-source-select').value;
+  const destIp = document.getElementById('trace-dest-ip').value.trim();
+  if (!destIp) {
+    showToast('Destination IP Address or Target Node Label is required', 'warning');
+    return;
+  }
+
+  const runBtn = document.getElementById('trace-run-btn');
+  const origText = runBtn.textContent;
+  runBtn.disabled = true;
+  runBtn.textContent = 'Tracing...';
+
+  try {
+    const response = await fetch('/api/path-trace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_device_id: sourceId,
+        destination_ip: destIp,
+        mock_mode: true
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      showToast('Path trace failed: ' + (err.detail || response.statusText), 'error');
+      return;
+    }
+
+    const result = await response.json();
+    const hops = result.hops || [];
+    if (hops.length < 2) {
+      showToast('No path found to destination target', 'warning');
+      return;
+    }
+
+    closePathTraceModal();
+    highlightPathWithInterfaces(hops);
+    renderTraceResultInDetailPanel(sourceId, destIp, hops);
+    showToast(`Path trace complete: ${hops.length} hops found!`, 'success');
+  } catch (err) {
+    console.error(err);
+    showToast('Error executing path trace analysis', 'error');
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = origText;
+  }
 }
 
 function forceDownload(filename, content, type) {

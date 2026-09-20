@@ -22,6 +22,8 @@ end"""
 
     # Verify unencrypted enable password is flagged
     assert any(f["title"] == "Unencrypted Enable Password" for f in findings)
+    assert any(f.get("cis_rule_id") == "CIS-Cisco-1.1.2" for f in findings)
+    assert any("NIST" in f.get("framework", "") for f in findings)
 
     # Verify password encryption disabled is flagged
     assert any(f["title"] == "Password Encryption Disabled" for f in findings)

@@ -530,6 +530,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "CRITICAL",
                 "title": "Unencrypted Enable Password",
                 "description": "An unhashed/cleartext enable password is configured. Use 'enable secret' instead.",
+                "cis_rule_id": "CIS-Cisco-1.1.2",
+                "framework": "CIS Controls / NIST IA-5",
             }
         )
     # Check for service password-encryption being disabled
@@ -544,6 +546,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "HIGH",
                 "title": "Password Encryption Disabled",
                 "description": "Cleartext password encryption is disabled ('no service password-encryption'). Unhashed passwords will be exposed in show run.",
+                "cis_rule_id": "CIS-Cisco-1.1.4",
+                "framework": "CIS Controls / NIST IA-5",
             }
         )
 
@@ -560,6 +564,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "CRITICAL",
                 "title": "Insecure Management Protocol (Telnet) Allowed",
                 "description": "Telnet is permitted on terminal lines (VTY), transmitting credentials in cleartext. Enforce 'transport input ssh' instead.",
+                "cis_rule_id": "CIS-Cisco-2.1.1",
+                "framework": "CIS Controls / NIST AC-17",
             }
         )
     # Check for weak SNMP communities
@@ -576,6 +582,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                     "severity": "HIGH",
                     "title": f"Weak SNMP Community String ({community})",
                     "description": f"A default/well-known SNMP community string '{community}' with {access} access is configured. Change it to a secure name.",
+                    "cis_rule_id": "CIS-Cisco-3.2.1",
+                    "framework": "CIS Controls / NIST IA-2",
                 }
             )
 
@@ -592,6 +600,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "INFO",
                 "title": "Syslog Logging Disabled",
                 "description": "No external syslog logging server is configured. Add a 'logging <ip>' directive for security event auditing.",
+                "cis_rule_id": "CIS-Cisco-4.1.1",
+                "framework": "CIS Controls / NIST AU-6",
             }
         )
     # Check for login banner
@@ -602,6 +612,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "INFO",
                 "title": "Missing Login Banner (MOTD)",
                 "description": "No Message of the Day (MOTD) banner is configured. A banner warning against unauthorized access is recommended for legal compliance.",
+                "cis_rule_id": "CIS-Cisco-1.3.1",
+                "framework": "CIS Controls / NIST AC-8",
             }
         )
     # Check for domain-name
@@ -614,6 +626,8 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "severity": "INFO",
                 "title": "Missing Domain Name Configuration",
                 "description": "No global IP domain-name is configured, which is required for generating SSH host keys.",
+                "cis_rule_id": "CIS-Cisco-2.1.3",
+                "framework": "CIS Controls / NIST SC-8",
             }
         )
 

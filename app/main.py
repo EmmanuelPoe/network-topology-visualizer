@@ -3,6 +3,7 @@
 from __future__ import annotations
 import base64
 import asyncio
+import datetime
 import json
 import os
 import logging
@@ -1583,6 +1584,8 @@ async def export_file(
         "application/json",
         "image/png",
         "image/svg+xml",
+        "text/markdown",
+        "text/html",
     }
     if content_type not in allowed_types:
         raise HTTPException(
@@ -1608,3 +1611,150 @@ async def export_file(
         media_type=content_type,
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
     )
+
+
+@app.get("/api/export/report")
+async def export_executive_report(format: str = "markdown") -> Response:
+    """
+    Generates an Executive Network Topology & Security Audit Compliance Report.
+    Supports 'markdown' and 'html' format query parameters.
+    """
+    topo = manager.latest_topology or {
+        "devices": [],
+        "links": [],
+    }
+    from app.auditor import audit_topology
+    audit_results = audit_topology(topo)
+    devices = audit_results.get("devices", [])
+    links = audit_results.get("links", [])
+
+    findings = []
+    by_type = {}
+    by_layer = {}
+    total_interfaces = 0
+    for d in devices:
+        t = d.get("type", "unknown")
+        l = d.get("layer", "unknown")
+        by_type[t] = by_type.get(t, 0) + 1
+        by_layer[l] = by_layer.get(l, 0) + 1
+        total_interfaces += len(d.get("interfaces", []))
+        for f in d.get("audit_findings", []):
+            finding_copy = dict(f)
+            finding_copy["device_id"] = d.get("id")
+            finding_copy["device_label"] = d.get("label", d.get("id"))
+            findings.append(finding_copy)
+
+    crit_count = sum(1 for f in findings if f.get("severity") == "CRITICAL")
+    high_count = sum(1 for f in findings if f.get("severity") == "HIGH")
+    info_count = sum(1 for f in findings if f.get("severity") == "INFO")
+
+    timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if format.lower() == "html":
+        # Build clean HTML Executive Summary
+        devices_rows = "".join([
+            f"<tr><td><code>{d.get('id')}</code></td><td><strong>{d.get('label')}</strong></td><td>{d.get('type','').capitalize()}</td><td>{d.get('layer','').capitalize()}</td><td><code>{d.get('ip','N/A')}</code></td><td>{len(d.get('interfaces',[]))}</td></tr>"
+            for d in devices
+        ])
+        findings_rows = "".join([
+            f"<tr><td><span class='badge badge-{f.get('severity','').lower()}'>{f.get('severity')}</span></td><td><code>{f.get('cis_rule_id','N/A')}</code></td><td><strong>{f.get('title')}</strong></td><td>{f.get('device_id','Topology')}</td><td>{f.get('description')}</td></tr>"
+            for f in findings
+        ])
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Network Topology Executive Summary Report</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 32px; line-height: 1.5; }}
+    h1, h2, h3 {{ color: #58a6ff; border-bottom: 1px solid #21262d; padding-bottom: 8px; }}
+    .metrics {{ display: flex; gap: 16px; margin: 24px 0; }}
+    .card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; flex: 1; text-align: center; }}
+    .card .val {{ font-size: 2rem; font-weight: 700; color: #f0f6fc; margin-top: 4px; }}
+    table {{ width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem; }}
+    th, td {{ border: 1px solid #30363d; padding: 10px 12px; text-align: left; }}
+    th {{ background: #161b22; color: #8b949e; }}
+    tr:nth-child(even) {{ background: rgba(22, 27, 34, 0.5); }}
+    .badge {{ padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; }}
+    .badge-critical {{ background: rgba(248,81,73,0.2); color: #ff7b72; border: 1px solid rgba(248,81,73,0.4); }}
+    .badge-high {{ background: rgba(255,159,67,0.2); color: #ff9f43; border: 1px solid rgba(255,159,67,0.4); }}
+    .badge-info {{ background: rgba(56,139,253,0.2); color: #58a6ff; border: 1px solid rgba(56,139,253,0.4); }}
+    code {{ font-family: monospace; background: #21262d; padding: 2px 5px; border-radius: 4px; font-size: 0.85rem; color: #79c0ff; }}
+  </style>
+</head>
+<body>
+  <h1>Network Topology & Security Executive Report</h1>
+  <p style="color: #8b949e;">Generated on {timestamp_str} | Network Topology Visualizer</p>
+  
+  <div class="metrics">
+    <div class="card"><div>Total Devices</div><div class="val">{len(devices)}</div></div>
+    <div class="card"><div>Network Links</div><div class="val">{len(links)}</div></div>
+    <div class="card"><div>Total Interfaces</div><div class="val">{total_interfaces}</div></div>
+    <div class="card"><div>Security Audit Issues</div><div class="val" style="color: {'#ff7b72' if crit_count > 0 else '#58a6ff'};">{len(findings)}</div></div>
+  </div>
+
+  <h2>1. Device Inventory</h2>
+  <table>
+    <thead><tr><th>Device ID</th><th>Label</th><th>Type</th><th>Layer</th><th>Management IP</th><th>Interfaces</th></tr></thead>
+    <tbody>{devices_rows}</tbody>
+  </table>
+
+  <h2>2. Security & CIS Compliance Audit</h2>
+  <p>Overview: <strong>{crit_count} Critical</strong>, <strong>{high_count} High</strong>, <strong>{info_count} Info</strong> finding(s).</p>
+  <table>
+    <thead><tr><th>Severity</th><th>Rule ID</th><th>Title</th><th>Affected Unit</th><th>Description</th></tr></thead>
+    <tbody>{findings_rows or '<tr><td colspan="5" style="text-align:center; color:#8b949e;">No compliance issues detected.</td></tr>'}</tbody>
+  </table>
+</body>
+</html>"""
+
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": 'attachment; filename="topology_executive_report.html"'},
+        )
+
+    # Markdown format default
+    md_lines = [
+        "# Network Topology & Security Executive Report",
+        f"*Generated on {timestamp_str} by Network Topology Visualizer*",
+        "",
+        "## Executive Summary Metrics",
+        f"- **Total Network Devices**: `{len(devices)}`",
+        f"- **Total Inter-Device Links**: `{len(links)}`",
+        f"- **Configured Interfaces**: `{total_interfaces}`",
+        f"- **Security Findings**: `{len(findings)}` ({crit_count} Critical, {high_count} High, {info_count} Info)",
+        "",
+        "## 1. Network Inventory",
+        "| Device ID | Label | Type | Layer | Management IP | Interfaces |",
+        "|---|---|---|---|---|---|",
+    ]
+    for d in devices:
+        md_lines.append(
+            f"| `{d.get('id')}` | **{d.get('label')}** | {d.get('type','').capitalize()} | {d.get('layer','').capitalize()} | `{d.get('ip','N/A')}` | {len(d.get('interfaces',[]))} |"
+        )
+
+    md_lines.extend([
+        "",
+        "## 2. Security Compliance Audit",
+    ])
+    if not findings:
+        md_lines.append("No security or compliance issues detected in active topology.")
+    else:
+        md_lines.extend([
+            "| Severity | Rule ID | Title | Target | Framework / Rule Detail |",
+            "|---|---|---|---|---|",
+        ])
+        for f in findings:
+            md_lines.append(
+                f"| **{f.get('severity')}** | `{f.get('cis_rule_id','N/A')}` | {f.get('title')} | `{f.get('device_id','Topology')}` | {f.get('description')} |"
+            )
+
+    md_content = "\n".join(md_lines)
+    return Response(
+        content=md_content,
+        media_type="text/markdown",
+        headers={"Content-Disposition": 'attachment; filename="topology_executive_report.md"'},
+    )
+

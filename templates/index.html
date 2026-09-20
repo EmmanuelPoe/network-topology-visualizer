@@ -34,6 +34,7 @@
           <input type="file" id="file-upload" accept=".json,.yaml,.yml,.zip" onchange="uploadTopology(event)" hidden>
         </label>
         <button class="action-btn" onclick="openDiscoverModal()" title="Discover Network Topology">&#128269; Discover</button>
+        <button class="action-btn" onclick="openPathTraceModal()" title="Run Path Trace Analysis">&#128739; Trace Path</button>
         <select id="select-server-layout" class="premium-select-layout" onchange="loadServerLayout(this.value)">
           <option value="">-- Load Layout --</option>
         </select>
@@ -43,6 +44,7 @@
         <button class="action-btn export-btn" onclick="exportPNG()" id="btn-export-png" disabled title="Export as PNG">&#128247; PNG</button>
         <button class="action-btn export-btn" onclick="exportSVG()" id="btn-export-svg" disabled title="Export as SVG">&#10510; SVG</button>
         <button class="action-btn export-btn" onclick="exportJSON()" id="btn-export-json" disabled title="Save diagram as JSON">&#128190; Save JSON</button>
+        <button class="action-btn export-btn" onclick="exportExecutiveReport('markdown')" id="btn-export-report" disabled title="Export Executive Inventory & Security Compliance Report">&#128196; Report</button>
         <button class="action-btn export-btn" onclick="saveToServer()" id="btn-save-server" disabled title="Save current topology to server">&#9733; Save to Server</button>
         <div class="live-indicator hidden" id="live-indicator" title="Live topology feed active">
           <span class="live-dot"></span><span>LIVE</span>
@@ -60,7 +62,9 @@
         <div class="segmented-control" id="layout-segmented-control">
           <div class="segmented-slider"></div>
           <button class="segmented-btn" id="btn-layout-free" onclick="setLayout('free')">Free</button>
-          <button class="segmented-btn active" id="btn-layout-hierarchical" onclick="setLayout('hierarchical')">Hierarchical</button>
+          <button class="segmented-btn active" id="btn-layout-hierarchical" onclick="setLayout('hierarchical')">Tree</button>
+          <button class="segmented-btn" id="btn-layout-circular" onclick="setLayout('circular')">Circle</button>
+          <button class="segmented-btn" id="btn-layout-grid" onclick="setLayout('grid')">Grid</button>
         </div>
       </div>
  
@@ -360,6 +364,29 @@
       </div>
       <div class="modal-actions" style="margin-top: 16px; flex-shrink: 0;">
         <button onclick="closeConfigViewerModal()" class="ctrl-btn active">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Path Trace Modal -->
+  <div id="path-trace-modal" class="modal-overlay hidden">
+    <div class="modal" style="width: 480px; max-width: 95vw;">
+      <h3 id="path-trace-modal-title">Network Path Trace Analysis</h3>
+      <div class="form-group" style="margin-top: 14px;">
+        <label for="trace-source-select">Source Device</label>
+        <select id="trace-source-select" style="width: 100%; padding: 6px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 0.85rem; outline: none;"></select>
+      </div>
+      <div class="form-group">
+        <label for="trace-dest-ip">Destination Target IP</label>
+        <input type="text" id="trace-dest-ip" placeholder="e.g. 10.0.0.5" pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$">
+      </div>
+      <div id="trace-hops-container" style="margin-top: 14px; max-height: 200px; overflow-y: auto; display: none;">
+        <p style="font-size: 0.75rem; color: #8b949e; margin-bottom: 6px; font-weight: 600;">Hops Sequence:</p>
+        <div id="trace-hops-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+      </div>
+      <div class="modal-actions" style="margin-top: 18px;">
+        <button onclick="closePathTraceModal()" class="ctrl-btn">Cancel</button>
+        <button id="trace-run-btn" onclick="runModalPathTrace()" class="ctrl-btn active">Execute Trace</button>
       </div>
     </div>
   </div>
