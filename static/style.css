@@ -1574,4 +1574,615 @@ h1 { font-size: 1.1rem; color: #58a6ff; }
   font-family: monospace;
 }
 
+/* ============================================================
+   Live SNMP/SSH Telemetry & Diagnostic Styles
+   ============================================================ */
+.telemetry-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.telemetry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.telemetry-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c9d1d9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.telemetry-gauge-card {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.telemetry-gauge-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  margin-bottom: 4px;
+}
+
+.telemetry-gauge-label {
+  color: #8b949e;
+}
+
+.telemetry-gauge-val {
+  font-family: monospace;
+  font-weight: 600;
+  color: #c9d1d9;
+}
+
+.telemetry-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.telemetry-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.telemetry-bar-fill.normal {
+  background: #3fb950;
+}
+
+.telemetry-bar-fill.warning {
+  background: #d29922;
+}
+
+.telemetry-bar-fill.critical {
+  background: #f85149;
+}
+
+.telemetry-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.telemetry-chip {
+  font-size: 0.68rem;
+  font-family: monospace;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #8b949e;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.telemetry-chip strong {
+  color: #c9d1d9;
+}
+
+.poll-btn-sm {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #58a6ff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.poll-btn-sm:hover {
+  background: #30363d;
+  border-color: #58a6ff;
+}
+
+/* ============================================================
+   Path Trace Diagnostics & Bottleneck Styles
+   ============================================================ */
+.trace-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.trace-summary-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 5px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.trace-summary-label {
+  font-size: 0.65rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.trace-summary-val {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #58a6ff;
+  font-family: monospace;
+}
+
+.trace-bottleneck-card {
+  background: rgba(255, 159, 67, 0.08);
+  border: 1px solid rgba(255, 159, 67, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.trace-bottleneck-icon {
+  font-size: 1.1rem;
+  color: #ff9f43;
+}
+
+.trace-bottleneck-content {
+  flex: 1;
+}
+
+.trace-bottleneck-title {
+  font-weight: 600;
+  color: #ff9f43;
+}
+
+.trace-bottleneck-desc {
+  color: #8b949e;
+  font-size: 0.7rem;
+}
+
+.trace-diagnostic-banner {
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 0.73rem;
+  line-height: 1.35;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trace-diagnostic-banner.warning {
+  background: rgba(210, 153, 34, 0.12);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  color: #e3b341;
+}
+
+.trace-diagnostic-banner.critical {
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  color: #ff7b72;
+}
+
+.trace-path-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #30363d;
+  padding-bottom: 6px;
+}
+
+.trace-path-tab {
+  background: #161b22;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.trace-path-tab.active {
+  background: #21262d;
+  border-color: #58a6ff;
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+/* ============================================================
+   Enterprise NOC Command Bar & Header Styles
+   ============================================================ */
+.enterprise-header {
+  background: #0d1117;
+  border-bottom: 1px solid #30363d;
+  padding: 8px 16px;
+  position: relative;
+  z-index: 100;
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.2), rgba(35, 134, 54, 0.2));
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  border-radius: 8px;
+  font-size: 1.1rem;
+}
+
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #f0f6fc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+}
+
+.enterprise-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(56, 139, 253, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.35);
+  color: #58a6ff;
+  text-transform: uppercase;
+}
+
+/* NOC Operational KPIs */
+.noc-kpi-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px;
+}
+
+.kpi-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.kpi-pill:hover {
+  background: #21262d;
+  border-color: #58a6ff;
+  transform: translateY(-1px);
+}
+
+.kpi-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.kpi-dot.green {
+  background: #3fb950;
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
+}
+
+.kpi-dot.blue {
+  background: #58a6ff;
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.6);
+}
+
+.kpi-dot.purple {
+  background: #bc8cff;
+  box-shadow: 0 0 6px rgba(188, 140, 255, 0.6);
+}
+
+.kpi-dot.red {
+  background: #f85149;
+  box-shadow: 0 0 6px rgba(248, 81, 73, 0.6);
+}
+
+.kpi-label {
+  color: #8b949e;
+  font-weight: 500;
+}
+
+.kpi-val {
+  color: #f0f6fc;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.kpi-icon {
+  font-size: 0.8rem;
+}
+
+/* Dropdown Menu System */
+.dropdown-menu-container {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-trigger {
+  cursor: pointer;
+}
+
+.dropdown-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 210px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 6px 0;
+  z-index: 1000;
+  backdrop-filter: blur(8px);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  color: #c9d1d9;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  box-sizing: border-box;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background: #21262d;
+  color: #58a6ff;
+}
+
+.dropdown-item:disabled {
+  color: #484f58;
+  cursor: not-allowed;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: #21262d;
+  margin: 6px 0;
+}
+
+.dropdown-header {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #8b949e;
+  padding: 4px 14px 2px 14px;
+  letter-spacing: 0.05em;
+}
+
+.poll-btn-highlight {
+  background: linear-gradient(180deg, #1f6feb 0%, #1158c7 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  font-weight: 600;
+}
+
+.poll-btn-highlight:hover:not(:disabled) {
+  background: linear-gradient(180deg, #388bfd 0%, #1f6feb 100%) !important;
+  box-shadow: 0 0 10px rgba(56, 139, 253, 0.4);
+}
+
+.edit-toggle-btn.active-editing {
+  background: #d29922 !important;
+  color: #0d1117 !important;
+  border-color: #f2c744 !important;
+  font-weight: 700;
+}
+
+/* ============================================================
+   Enterprise IPAM & Data Tables
+   ============================================================ */
+.enterprise-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.75rem;
+}
+
+.enterprise-table th {
+  background: #161b22;
+  color: #8b949e;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid #30363d;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+
+.enterprise-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  color: #c9d1d9;
+  vertical-align: middle;
+}
+
+.enterprise-table tbody tr:hover {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.enterprise-table tbody tr.has-conflict {
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.ipam-cidr-badge {
+  font-family: monospace;
+  font-weight: 700;
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 4px;
+  padding: 2px 6px;
+  display: inline-block;
+}
+
+.ipam-assignment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 2px;
+  font-family: monospace;
+  font-size: 0.68rem;
+}
+
+.ipam-assignment-chip strong {
+  color: #79c0ff;
+}
+
+/* ============================================================
+   Floating Bulk Action Bar
+   ============================================================ */
+.bulk-action-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(22, 27, 34, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid #388bfd;
+  border-radius: 30px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(56, 139, 253, 0.3);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 1000;
+  animation: slideUpFade 0.2s ease-out;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 15px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.bulk-action-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bulk-badge {
+  background: #388bfd;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.bulk-names {
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulk-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bulk-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bulk-btn:hover {
+  background: #30363d;
+  color: #58a6ff;
+  border-color: #58a6ff;
+}
+
+.bulk-btn.cancel {
+  background: transparent;
+  border-color: transparent;
+  color: #8b949e;
+}
+
+.bulk-btn.cancel:hover {
+  color: #f85149;
+}
+
+
+
 

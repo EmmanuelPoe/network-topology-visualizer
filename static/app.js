@@ -697,6 +697,19 @@ function showBulkActionPanel(deviceIds) {
   if (!currentTopology) return;
   const devices = deviceIds.map(id => currentTopology.devices.find(d => d.id === id)).filter(Boolean);
   
+  const bulkBar = document.getElementById('bulk-action-bar');
+  if (bulkBar) {
+    if (devices.length > 1) {
+      bulkBar.classList.remove('hidden');
+      const badge = document.getElementById('bulk-count-badge');
+      if (badge) badge.textContent = `${devices.length} Devices Selected`;
+      const namesEl = document.getElementById('bulk-names-preview');
+      if (namesEl) namesEl.textContent = devices.map(d => d.label).join(', ');
+    } else {
+      bulkBar.classList.add('hidden');
+    }
+  }
+
   document.getElementById('detail-title').textContent = `Bulk Actions (${devices.length})`;
   
   const selectEl = document.getElementById('terminal-mode-select');
@@ -704,7 +717,7 @@ function showBulkActionPanel(deviceIds) {
 
   document.getElementById('detail-body').innerHTML = `
     <div class="detail-card">
-      <div class="card-title">Selected Devices</div>
+      <div class="card-title">Selected Devices (${devices.length})</div>
       <div style="max-height: 120px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #30363d; border-radius: 6px; padding: 6px; background: #161b22;">
         ${devices.map(d => `
           <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 4px 6px; border-bottom: 1px solid #21262d;">
@@ -902,7 +915,16 @@ async function runPathTrace(sourceId, destIp) {
     }
 
     highlightPathWithInterfaces(hops);
-    renderTraceResultInDetailPanel(sourceId, destIp, hops);
+    renderTraceResultInDetailPanel(
+      sourceId,
+      destIp,
+      hops,
+      result.diagnostics || [],
+      result.bottleneck || null,
+      result.alternate_paths || [],
+      result.cumulative_latency_ms || null,
+      result.path_mtu || null
+    );
     showToast(`Path trace completed: ${hops.length} hops`, 'success');
   } catch (error) {
     console.error('Failed to run path trace:', error);
@@ -991,44 +1013,146 @@ function highlightPathWithInterfaces(hops) {
   });
 }
 
-function renderTraceResultInDetailPanel(sourceId, destIp, hops) {
+function renderTraceResultInDetailPanel(
+  sourceId,
+  destIp,
+  hops,
+  diagnostics = [],
+  bottleneck = null,
+  alternatePaths = [],
+  cumulativeLatency = null,
+  pathMtu = null
+) {
   const sourceDevice = currentTopology.devices.find(d => d.id === sourceId);
   const sourceLabel = sourceDevice ? sourceDevice.label : sourceId;
 
   document.getElementById('detail-title').textContent = `Trace: to ${destIp}`;
-  
+
+  const latencyDisplay = cumulativeLatency !== null ? `${cumulativeLatency} ms` : (hops.length * 4.2).toFixed(1) + ' ms';
+  const mtuDisplay = pathMtu ? `${pathMtu} B` : '1500 B';
+
+  // Diagnostic banners
+  let diagHtml = '';
+  if (diagnostics && diagnostics.length > 0) {
+    diagHtml = diagnostics.map(d => {
+      const isCrit = d.severity === 'critical';
+      return `
+        <div class="trace-diagnostic-banner ${isCrit ? 'critical' : 'warning'}">
+          <div style="font-size: 1rem;">${isCrit ? '🚫' : '⚠️'}</div>
+          <div><strong>${isCrit ? 'Critical Warning' : 'Configuration Issue'}:</strong> ${escapeHtml(d.message)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Bottleneck Card
+  let bottleneckHtml = '';
+  if (bottleneck) {
+    bottleneckHtml = `
+      <div class="trace-bottleneck-card">
+        <div class="trace-bottleneck-icon">⚡</div>
+        <div class="trace-bottleneck-content">
+          <div class="trace-bottleneck-title">Bandwidth Bottleneck: ${escapeHtml(bottleneck.bandwidth)}</div>
+          <div class="trace-bottleneck-desc">Between <strong>${escapeHtml(bottleneck.source_label || bottleneck.source)}</strong> and <strong>${escapeHtml(bottleneck.target_label || bottleneck.target)}</strong></div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Alternate Paths (ECMP) Tabs
+  let altPathsHtml = '';
+  if (alternatePaths && alternatePaths.length > 0) {
+    altPathsHtml = `
+      <div class="trace-path-tabs" id="trace-path-tabs">
+        <button class="trace-path-tab active" id="tab-path-primary" onclick="switchTracePath('primary')">Path 1 (Primary)</button>
+        ${alternatePaths.map((alt, aIdx) => `
+          <button class="trace-path-tab" id="tab-path-alt-${aIdx}" onclick="switchTracePath(${aIdx})">ECMP Route ${aIdx + 2}</button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  window._activeTraceData = {
+    sourceId,
+    destIp,
+    primaryHops: hops,
+    diagnostics,
+    bottleneck,
+    alternatePaths,
+    cumulativeLatency,
+    pathMtu
+  };
+
+  const renderHopsList = (hopList) => `
+    <div style="position: relative; padding-left: 20px; margin-top: 15px; border-left: 2px dashed #30363d; margin-left: 8px;">
+      ${hopList.map((hop, idx) => {
+        const isLast = idx === hopList.length - 1;
+        const isFirst = idx === 0;
+        const isWarn = hop.status === 'warning' || (hop.issues && hop.issues.length > 0);
+        const isCrit = hop.status === 'critical';
+        const dotColor = isCrit ? '#f85149' : (isWarn ? '#e3b341' : '#388bfd');
+
+        return `
+          <div style="position: relative; margin-bottom: 20px;">
+            <span style="position: absolute; left: -27px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: ${dotColor}; border: 3px solid #0d1117;"></span>
+
+            <div style="background: #161b22; border: 1px solid ${isCrit ? '#f85149' : (isWarn ? '#d29922' : '#30363d')}; border-radius: 6px; padding: 8px 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${escapeHtml(hop.label)}</span>
+                <span class="uppercase-badge">${escapeHtml(hop.type)}</span>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #8b949e; font-family: monospace; margin-top: 2px;">
+                <span>IP: ${escapeHtml(hop.ip || 'N/A')}</span>
+                <span>Latency: ~${hop.hop_latency_ms ? hop.hop_latency_ms + 'ms' : '1.2ms'}</span>
+              </div>
+
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 0.7rem; font-family: monospace; color: #c9d1d9; border-top: 1px solid #21262d; padding-top: 6px;">
+                ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${escapeHtml(hop.ingress_interface || '')} ${hop.ingress_mtu ? `(MTU ${hop.ingress_mtu})` : ''}</div>` : ''}
+                ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${escapeHtml(hop.egress_interface || '')} ${hop.egress_mtu ? `(MTU ${hop.egress_mtu})` : ''}</div>` : ''}
+                ${hop.link_bandwidth && hop.link_bandwidth !== 'N/A' ? `<div style="background: rgba(63, 185, 80, 0.1); border: 1px solid rgba(63, 185, 80, 0.2); padding: 1px 4px; border-radius: 3px; color: #3fb950;">BW: ${escapeHtml(hop.link_bandwidth)}</div>` : ''}
+              </div>
+
+              ${hop.issues && hop.issues.length > 0 ? `
+                <div style="margin-top: 6px; font-size: 0.68rem; color: #ff7b72; background: rgba(248, 81, 73, 0.1); border-radius: 3px; padding: 2px 6px;">
+                  ⚠️ ${hop.issues.map(escapeHtml).join(' | ')}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
   let html = `
     <div class="detail-card">
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
         <span style="font-size: 0.72rem; color: #8b949e; font-weight: 600;">SOURCE: ${escapeHtml(sourceLabel)}</span>
         <button id="btn-back-to-device" class="ctrl-btn" style="width: auto; margin: 0; padding: 2px 8px; font-size: 0.65rem;">Back</button>
       </div>
-      
-      <div style="position: relative; padding-left: 20px; margin-top: 15px; border-left: 2px dashed #30363d; margin-left: 8px;">
-        ${hops.map((hop, idx) => {
-          const isLast = idx === hops.length - 1;
-          const isFirst = idx === 0;
-          
-          return `
-            <div style="position: relative; margin-bottom: 20px;">
-              <span style="position: absolute; left: -27px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #ff9c3a; border: 3px solid #0d1117;"></span>
-              
-              <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${escapeHtml(hop.label)}</span>
-                  <span class="uppercase-badge">${escapeHtml(hop.type)}</span>
-                </div>
-                
-                <div style="font-size: 0.75rem; color: #8b949e; font-family: monospace; margin-top: 4px;">IP: ${escapeHtml(hop.ip || '')}</div>
-                
-                <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 0.7rem; font-family: monospace; color: #c9d1d9; border-top: 1px solid #21262d; padding-top: 6px;">
-                  ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${escapeHtml(hop.ingress_interface || '')}</div>` : ''}
-                  ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${escapeHtml(hop.egress_interface || '')}</div>` : ''}
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('')}
+
+      <div class="trace-summary-grid">
+        <div class="trace-summary-card">
+          <div class="trace-summary-label">Total Hops</div>
+          <div class="trace-summary-val">${hops.length}</div>
+        </div>
+        <div class="trace-summary-card">
+          <div class="trace-summary-label">Est. Latency</div>
+          <div class="trace-summary-val">${latencyDisplay}</div>
+        </div>
+        <div class="trace-summary-card">
+          <div class="trace-summary-label">Path MTU</div>
+          <div class="trace-summary-val">${mtuDisplay}</div>
+        </div>
+      </div>
+
+      ${diagHtml}
+      ${bottleneckHtml}
+      ${altPathsHtml}
+
+      <div id="trace-hops-list-container">
+        ${renderHopsList(hops)}
       </div>
     </div>
   `;
@@ -1043,6 +1167,56 @@ function renderTraceResultInDetailPanel(sourceId, destIp, hops) {
       const dev = currentTopology.devices.find(d => d.id === sourceId);
       if (dev) showDeviceDetail(dev, currentTopology.links);
     });
+  }
+}
+
+function switchTracePath(pathTarget) {
+  if (!window._activeTraceData) return;
+  const { primaryHops, alternatePaths } = window._activeTraceData;
+  let targetHops = primaryHops;
+
+  const tabs = document.querySelectorAll('.trace-path-tab');
+  tabs.forEach(t => t.classList.remove('active'));
+
+  if (pathTarget === 'primary') {
+    document.getElementById('tab-path-primary')?.classList.add('active');
+    targetHops = primaryHops;
+  } else {
+    document.getElementById(`tab-path-alt-${pathTarget}`)?.classList.add('active');
+    if (alternatePaths && alternatePaths[pathTarget]) {
+      targetHops = alternatePaths[pathTarget].hops;
+    }
+  }
+
+  highlightPathWithInterfaces(targetHops);
+
+  const container = document.getElementById('trace-hops-list-container');
+  if (container) {
+    container.innerHTML = `
+      <div style="position: relative; padding-left: 20px; margin-top: 15px; border-left: 2px dashed #30363d; margin-left: 8px;">
+        ${targetHops.map((hop, idx) => {
+          const isLast = idx === targetHops.length - 1;
+          const isFirst = idx === 0;
+          return `
+            <div style="position: relative; margin-bottom: 20px;">
+              <span style="position: absolute; left: -27px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #388bfd; border: 3px solid #0d1117;"></span>
+              <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-weight: 600; font-size: 0.82rem; color: #ff9c3a;">Hop ${idx + 1}: ${escapeHtml(hop.label)}</span>
+                  <span class="uppercase-badge">${escapeHtml(hop.type)}</span>
+                </div>
+                <div style="font-size: 0.72rem; color: #8b949e; font-family: monospace;">IP: ${escapeHtml(hop.ip || 'N/A')}</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 0.7rem; font-family: monospace; color: #c9d1d9; border-top: 1px solid #21262d; padding-top: 6px;">
+                  ${!isFirst ? `<div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.2); padding: 1px 4px; border-radius: 3px; color: #58a6ff;">In: ${escapeHtml(hop.ingress_interface || '')}</div>` : ''}
+                  ${!isLast ? `<div style="background: rgba(255, 156, 58, 0.1); border: 1px solid rgba(255, 156, 58, 0.2); padding: 1px 4px; border-radius: 3px; color: #ff9c3a;">Out: ${escapeHtml(hop.egress_interface || '')}</div>` : ''}
+                  ${hop.link_bandwidth ? `<div style="background: rgba(63, 185, 80, 0.1); border: 1px solid rgba(63, 185, 80, 0.2); padding: 1px 4px; border-radius: 3px; color: #3fb950;">BW: ${escapeHtml(hop.link_bandwidth)}</div>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
   }
 }
 
@@ -1127,6 +1301,13 @@ end`;
                     </div>
                   </div>
                   <div class="audit-desc">${f.description}</div>
+                  ${f.remediation_cli ? `
+                    <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
+                      <button class="poll-btn-sm" style="color: #3fb950; border-color: rgba(63,185,80,0.4); cursor: pointer;" onclick="openRemediationModal('${escapeHtml(f.title).replace(/'/g, "\\'")}', '${escapeHtml(device.label).replace(/'/g, "\\'")}', ${JSON.stringify(f.remediation_cli)})">
+                        ⚡ Remediate
+                      </button>
+                    </div>
+                  ` : ''}
                 </div>
               `;
             }).join('')
@@ -1158,6 +1339,49 @@ end`;
       ${device.platform ? `<div class="detail-row"><div class="detail-key">Platform</div><div class="detail-val font-mono">${escapeHtml(device.platform)}</div></div>` : ''}
     </div>
 
+    <!-- Live SNMP / SSH Telemetry Card -->
+    <div class="telemetry-card">
+      <div class="telemetry-header">
+        <div class="telemetry-title">
+          <span>⚡ Live Telemetry</span>
+          <span class="telemetry-chip" style="font-size: 0.6rem;">${escapeHtml(statusInfo.protocol || 'SNMPv2c')}</span>
+        </div>
+        <button class="poll-btn-sm" id="btn-poll-device-${escapeHtml(device.id)}" onclick="pollDeviceNow('${escapeHtml(device.id)}')">
+          ⟳ Poll
+        </button>
+      </div>
+
+      <div class="telemetry-grid">
+        <div class="telemetry-gauge-card">
+          <div class="telemetry-gauge-header">
+            <span class="telemetry-gauge-label">CPU Load</span>
+            <span class="telemetry-gauge-val">${statusInfo.cpu_utilization !== undefined ? statusInfo.cpu_utilization + '%' : '--'}</span>
+          </div>
+          <div class="telemetry-bar-bg">
+            <div class="telemetry-bar-fill ${(statusInfo.cpu_utilization || 0) > 85 ? 'critical' : ((statusInfo.cpu_utilization || 0) > 70 ? 'warning' : 'normal')}"
+                 style="width: ${Math.min(100, Math.max(2, statusInfo.cpu_utilization || 0))}%;"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-gauge-card">
+          <div class="telemetry-gauge-header">
+            <span class="telemetry-gauge-label">RAM Load</span>
+            <span class="telemetry-gauge-val">${statusInfo.memory_utilization !== undefined ? statusInfo.memory_utilization + '%' : '--'}</span>
+          </div>
+          <div class="telemetry-bar-bg">
+            <div class="telemetry-bar-fill ${(statusInfo.memory_utilization || 0) > 85 ? 'critical' : ((statusInfo.memory_utilization || 0) > 70 ? 'warning' : 'normal')}"
+                 style="width: ${Math.min(100, Math.max(2, statusInfo.memory_utilization || 0))}%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="telemetry-chips-row">
+        <span class="telemetry-chip">Loss: <strong>${statusInfo.packet_loss !== undefined ? statusInfo.packet_loss + '%' : '0%'}</strong></span>
+        <span class="telemetry-chip">Up: <strong>${escapeHtml(statusInfo.uptime || 'Active')}</strong></span>
+        <span class="telemetry-chip">SNMP: <strong style="color: ${statusInfo.snmp_status === 'OK' ? '#3fb950' : '#f85149'};">${escapeHtml(statusInfo.snmp_status || 'OK')}</strong></span>
+      </div>
+    </div>
+
     <!-- Security compliance findings -->
     ${auditHtml}
 
@@ -1183,12 +1407,18 @@ end`;
             const remoteDevice = currentTopology.devices.find(d => d.id === remoteNodeId);
             const remoteLabel = remoteDevice ? remoteDevice.label : remoteNodeId;
             const localIface = isSrc ? (l.src_iface || 'Gi0/1') : (l.dst_iface || 'Gi0/1');
+            const ifRate = (statusInfo.interface_rates && statusInfo.interface_rates[localIface]) ? statusInfo.interface_rates[localIface] : null;
             
             return `
               <div class="interface-item">
                 <div class="interface-meta">
                   <span class="interface-name">${escapeHtml(localIface)}</span>
                   <span class="interface-peer">to ${escapeHtml(remoteLabel)}</span>
+                  ${ifRate ? `
+                    <div style="font-size: 0.65rem; font-family: monospace; color: #58a6ff; margin-top: 2px;">
+                      ▲ ${ifRate.tx_mbps} Mbps &nbsp; ▼ ${ifRate.rx_mbps} Mbps
+                    </div>
+                  ` : ''}
                 </div>
                 <div class="interface-stats">
                   <span class="proto-tag">${escapeHtml(l.protocol || 'UP')}</span>
@@ -1424,6 +1654,7 @@ function showEdgeDetail(link) {
 function resetDetailPanel() {
   setDetailVisible(false);
   resetGraphHighlight();
+  document.getElementById('bulk-action-bar')?.classList.add('hidden');
 }
 
 function setDetailVisible(visible) {
@@ -1442,6 +1673,7 @@ function updateStats(data) {
     Object.entries(types).map(([t, n]) => `${t}: ${n}`).join('<br>');
   
   updateDiagnosticsSummary(data);
+  updateNocKpiBar();
 }
 
 function updateDiagnosticsSummary(data) {
@@ -1534,6 +1766,8 @@ function enableExportButtons(enabled) {
   document.getElementById('btn-export-json').disabled = !enabled;
   const btnReport = document.getElementById('btn-export-report');
   if (btnReport) btnReport.disabled = !enabled;
+  const btnPoll = document.getElementById('btn-poll-now');
+  if (btnPoll) btnPoll.disabled = !enabled;
   document.getElementById('btn-save-server').disabled = !enabled;
 }
 
@@ -1611,7 +1845,16 @@ async function runModalPathTrace() {
 
     closePathTraceModal();
     highlightPathWithInterfaces(hops);
-    renderTraceResultInDetailPanel(sourceId, destIp, hops);
+    renderTraceResultInDetailPanel(
+      sourceId,
+      destIp,
+      hops,
+      result.diagnostics || [],
+      result.bottleneck || null,
+      result.alternate_paths || [],
+      result.cumulative_latency_ms || null,
+      result.path_mtu || null
+    );
     showToast(`Path trace complete: ${hops.length} hops found!`, 'success');
   } catch (err) {
     console.error(err);
@@ -1946,6 +2189,12 @@ function handleStatusUpdate(statuses) {
     if (isOnline && latency !== undefined && latency !== null) {
       tooltip += `\nLatency: ${latency}ms`;
     }
+    if (isOnline && status.cpu_utilization !== undefined) {
+      tooltip += `\nCPU: ${status.cpu_utilization}% | RAM: ${status.memory_utilization}%`;
+    }
+    if (status.packet_loss !== undefined && status.packet_loss > 0) {
+      tooltip += `\nPacket Loss: ${status.packet_loss}%`;
+    }
 
     updates.push({
       id: deviceId,
@@ -1965,6 +2214,374 @@ function handleStatusUpdate(statuses) {
       showDeviceDetail(node._data, currentTopology.links);
     }
   }
+
+  updateNocKpiBar();
+}
+
+async function pollAllNow() {
+  const btn = document.getElementById('btn-poll-now');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '&#8635; Polling...';
+  }
+  try {
+    const res = await fetch('/api/poll/all', { method: 'POST' });
+    if (!res.ok) throw new Error('Polling request failed: ' + res.statusText);
+    const data = await res.json();
+    if (data.statuses) {
+      handleStatusUpdate(data.statuses);
+      showToast(`Polled ${data.devices_polled || Object.keys(data.statuses).length} devices successfully!`, 'success');
+    }
+  } catch (err) {
+    console.error('Error polling devices:', err);
+    showToast('Failed to poll devices: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '&#8635; Poll Now';
+    }
+  }
+}
+
+async function pollDeviceNow(deviceId) {
+  const btn = document.getElementById(`btn-poll-device-${deviceId}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Polling...';
+  }
+  try {
+    const res = await fetch(`/api/poll/device/${encodeURIComponent(deviceId)}`, { method: 'POST' });
+    if (!res.ok) throw new Error('Polling failed: ' + res.statusText);
+    const data = await res.json();
+    if (data.telemetry) {
+      const singleStatus = {};
+      singleStatus[deviceId] = data.telemetry;
+      handleStatusUpdate(singleStatus);
+      showToast(`Telemetry refreshed for ${deviceId}`, 'success');
+    }
+  } catch (err) {
+    console.error('Error polling device:', err);
+    showToast('Device poll failed: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⟳ Poll';
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Enterprise NOC Navigation & Dropdown Handlers
+// ---------------------------------------------------------------------------
+function toggleDropdown(dropdownId, event) {
+  if (event) event.stopPropagation();
+  const dropdowns = ['inventory-dropdown', 'tools-dropdown', 'export-dropdown'];
+  dropdowns.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id === dropdownId) {
+      el.classList.toggle('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  });
+}
+
+window.addEventListener('click', (e) => {
+  if (!e.target.closest('.dropdown-menu-container')) {
+    ['inventory-dropdown', 'tools-dropdown', 'export-dropdown'].forEach(id => {
+      document.getElementById(id)?.classList.add('hidden');
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Real-Time NOC Operational KPIs & Filters
+// ---------------------------------------------------------------------------
+let _mismatchFilterActive = false;
+
+async function updateNocKpiBar() {
+  if (!currentTopology) return;
+
+  const devices = currentTopology.devices || [];
+  const links = currentTopology.links || [];
+
+  let onlineCount = 0;
+  let offlineCount = 0;
+  devices.forEach(d => {
+    const s = deviceHealthStatuses[d.id];
+    if (s && !s.online) {
+      offlineCount++;
+    } else {
+      onlineCount++;
+    }
+  });
+
+  const devPill = document.getElementById('kpi-devices-val');
+  const devDot = document.getElementById('kpi-devices-dot');
+  if (devPill) {
+    devPill.textContent = `${onlineCount}/${devices.length}`;
+    if (devDot) {
+      devDot.className = offlineCount > 0 ? 'kpi-dot red' : 'kpi-dot green';
+    }
+  }
+
+  const mismatchCount = links.filter(l => l.vlan_mismatch || l.subnet_mismatch || l.mtu_mismatch || l.speed_mismatch || (l.warnings && l.warnings.length > 0)).length;
+  const linkPill = document.getElementById('kpi-links-val');
+  const linkDot = document.getElementById('kpi-links-dot');
+  if (linkPill) {
+    linkPill.textContent = `${links.length - mismatchCount}/${links.length}`;
+    if (linkDot) {
+      linkDot.className = mismatchCount > 0 ? 'kpi-dot red' : 'kpi-dot blue';
+    }
+  }
+
+  let critCount = 0, highCount = 0, infoCount = 0;
+  devices.forEach(d => {
+    (d.audit_findings || []).forEach(f => {
+      const sev = (f.severity || '').toUpperCase();
+      if (sev === 'CRITICAL') critCount++;
+      else if (sev === 'HIGH') highCount++;
+      else infoCount++;
+    });
+  });
+  const deduction = (critCount * 15) + (highCount * 8) + (infoCount * 2);
+  const score = devices.length > 0 ? Math.max(10, Math.min(100, 100 - deduction)) : 100;
+  const compPill = document.getElementById('kpi-compliance-val');
+  const compDot = document.getElementById('kpi-compliance-dot');
+  if (compPill) {
+    compPill.textContent = `${score}%`;
+    if (compDot) {
+      compDot.className = score >= 85 ? 'kpi-dot green' : (score >= 60 ? 'kpi-dot purple' : 'kpi-dot red');
+    }
+  }
+
+  try {
+    const ipamResp = await fetch('/api/topology/ipam');
+    if (ipamResp.ok) {
+      const ipamData = await ipamResp.json();
+      window._cachedIpamData = ipamData;
+      const ipamPill = document.getElementById('kpi-ipam-val');
+      if (ipamPill) {
+        ipamPill.textContent = `${ipamData.total_subnets} Subnets`;
+      }
+    }
+  } catch (e) {
+    console.debug('Failed to fetch IPAM metrics:', e);
+  }
+}
+
+function toggleMismatchesFilter() {
+  if (!currentTopology || !edgesDataset) return;
+  _mismatchFilterActive = !_mismatchFilterActive;
+
+  if (_mismatchFilterActive) {
+    const mismatchLinkIndices = [];
+    currentTopology.links.forEach((l, idx) => {
+      if (l.vlan_mismatch || l.subnet_mismatch || l.mtu_mismatch || l.speed_mismatch || (l.warnings && l.warnings.length > 0)) {
+        mismatchLinkIndices.push(idx);
+      }
+    });
+
+    if (mismatchLinkIndices.length === 0) {
+      showToast('All physical and logical links are healthy (0 mismatches)', 'success');
+      _mismatchFilterActive = false;
+      return;
+    }
+
+    const updates = edgesDataset.get().map(e => ({
+      id: e.id,
+      color: mismatchLinkIndices.includes(e.id) ? { color: '#f85149', highlight: '#ff7b72' } : { color: 'rgba(255,255,255,0.06)' },
+      width: mismatchLinkIndices.includes(e.id) ? 3 : 1,
+      dashes: mismatchLinkIndices.includes(e.id) ? [6, 4] : false,
+    }));
+    edgesDataset.update(updates);
+    showToast(`Highlighting ${mismatchLinkIndices.length} configuration mismatch links`, 'warning');
+  } else {
+    resetGraphHighlight();
+    showToast('Reset link highlights', 'info');
+  }
+}
+
+function filterNocDevices() {
+  if (!currentTopology || !nodesDataset) return;
+  const offlineNodes = [];
+  currentTopology.devices.forEach(d => {
+    const s = deviceHealthStatuses[d.id];
+    if (s && !s.online) offlineNodes.push(d.id);
+  });
+
+  if (offlineNodes.length === 0) {
+    showToast('All managed devices are currently ONLINE', 'success');
+    return;
+  }
+
+  network.selectNodes(offlineNodes);
+  network.fit({ nodes: offlineNodes, animation: { duration: 600 } });
+  showToast(`Filtered to ${offlineNodes.length} offline device(s)`, 'warning');
+}
+
+// ---------------------------------------------------------------------------
+// IPAM Subnet Analyzer Modal
+// ---------------------------------------------------------------------------
+async function openIpamModal() {
+  const modal = document.getElementById('ipam-modal');
+  if (modal) modal.classList.remove('hidden');
+  await loadIpamData();
+}
+
+function closeIpamModal() {
+  document.getElementById('ipam-modal')?.classList.add('hidden');
+}
+
+async function loadIpamData() {
+  const tbody = document.getElementById('ipam-tbody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #8b949e; padding: 20px;">Auditing global IPAM addressing...</td></tr>';
+  }
+  try {
+    const res = await fetch('/api/topology/ipam');
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    window._cachedIpamData = data;
+    renderIpamTable(data);
+  } catch (err) {
+    console.error('IPAM fetch error:', err);
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" style="color: #f85149; text-align: center; padding: 20px;">Failed to load IPAM data: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderIpamTable(data) {
+  const tbody = document.getElementById('ipam-tbody');
+  const banner = document.getElementById('ipam-conflict-banner');
+  const stats = document.getElementById('ipam-summary-stats');
+
+  if (stats) {
+    stats.textContent = `${data.total_subnets} Subnets | ${data.total_ips_assigned} Assigned IPs | ${data.conflicts_count} Conflicts`;
+  }
+
+  if (banner) {
+    if (data.conflicts_count > 0) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `<strong>⚠️ ${data.conflicts_count} Address Conflicts Detected:</strong><br>${data.conflicts.map(c => escapeHtml(c.message)).join('<br>')}`;
+    } else {
+      banner.classList.add('hidden');
+    }
+  }
+
+  if (!tbody) return;
+  if (!data.subnets || data.subnets.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #8b949e; padding: 20px;">No IP-configured interfaces found in current topology.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.subnets.map(s => {
+    const isConflict = s.has_conflict;
+    return `
+      <tr class="${isConflict ? 'has-conflict' : ''}">
+        <td><span class="ipam-cidr-badge">${escapeHtml(s.cidr)}</span></td>
+        <td style="font-family: monospace;">${escapeHtml(s.netmask)}<br><span style="color: #8b949e; font-size: 0.68rem;">Wildcard: ${escapeHtml(s.wildcard)}</span></td>
+        <td style="font-family: monospace; color: #8b949e;">${escapeHtml(s.broadcast)}</td>
+        <td style="font-family: monospace;">
+          <strong>${s.assigned_hosts}</strong> / ${s.total_hosts} (${s.utilization_pct}%)<br>
+          <span style="font-size: 0.65rem; color: #8b949e;">${escapeHtml(s.usable_range)}</span>
+        </td>
+        <td>
+          <div style="max-height: 80px; overflow-y: auto;">
+            ${s.assignments.map(a => `
+              <span class="ipam-assignment-chip" title="${escapeHtml(a.device_label)} on ${escapeHtml(a.interface)}">
+                <strong>${escapeHtml(a.ip)}</strong> &bull; ${escapeHtml(a.device_label)}:${escapeHtml(a.interface)}
+              </span>
+            `).join('')}
+          </div>
+        </td>
+        <td>
+          ${isConflict ? `
+            <span class="uppercase-badge" style="background: rgba(248,81,73,0.2); color: #ff7b72; border: 1px solid #f85149;">Conflict</span>
+          ` : `
+            <span class="uppercase-badge" style="background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3);">Nominal</span>
+          `}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterIpamTable(query) {
+  if (!window._cachedIpamData) return;
+  const q = (query || '').toLowerCase().trim();
+  if (!q) {
+    renderIpamTable(window._cachedIpamData);
+    return;
+  }
+
+  const filtered = {
+    ...window._cachedIpamData,
+    subnets: window._cachedIpamData.subnets.filter(s => {
+      if (s.cidr.toLowerCase().includes(q)) return true;
+      if (s.netmask.toLowerCase().includes(q)) return true;
+      if (s.assignments.some(a => a.ip.includes(q) || a.device_label.toLowerCase().includes(q) || a.interface.toLowerCase().includes(q))) return true;
+      return false;
+    })
+  };
+  renderIpamTable(filtered);
+}
+
+// ---------------------------------------------------------------------------
+// Remediation CLI Generator Modal
+// ---------------------------------------------------------------------------
+let _currentRemediationSnippet = '';
+
+function openRemediationModal(title, deviceLabel, cliSnippet) {
+  _currentRemediationSnippet = cliSnippet;
+  document.getElementById('remediation-finding-title').textContent = title;
+  document.getElementById('remediation-device-label').textContent = deviceLabel;
+  document.getElementById('remediation-cli-body').textContent = cliSnippet;
+  document.getElementById('remediation-modal')?.classList.remove('hidden');
+}
+
+function closeRemediationModal() {
+  document.getElementById('remediation-modal')?.classList.add('hidden');
+}
+
+function copyRemediationCli() {
+  if (!_currentRemediationSnippet) return;
+  navigator.clipboard.writeText(_currentRemediationSnippet).then(() => {
+    showToast('Remediation CLI copied to clipboard!', 'success');
+  }).catch(() => {
+    showToast('Failed to copy to clipboard', 'error');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Multi-Device Bulk Operations
+// ---------------------------------------------------------------------------
+function clearNodeSelection() {
+  if (network) network.unselectAll();
+  document.getElementById('bulk-action-bar')?.classList.add('hidden');
+  resetDetailPanel();
+}
+
+async function pollSelectedDevices() {
+  if (!network) return;
+  const selected = network.getSelectedNodes();
+  if (selected.length === 0) return;
+  showToast(`Polling ${selected.length} selected devices...`, 'info');
+  for (const id of selected) {
+    await pollDeviceNow(id);
+  }
+  showToast(`Completed polling for ${selected.length} devices`, 'success');
+}
+
+function openBulkConsole() {
+  if (!network) return;
+  const selected = network.getSelectedNodes();
+  if (selected.length === 0) return;
+  const firstId = selected[0];
+  openTerminal(firstId);
+  showToast(`Terminal console connected for ${selected.length} target(s)`, 'info');
 }
 
 function initWebSocket() {

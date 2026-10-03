@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.discovery import MockDiscoveryEngine, NetmikoDiscoveryEngine
 from app.polling import LivePoller
 from app.path_tracer import trace_path
+from app.auditor import analyze_topology_subnets, compute_topology_overview
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app.main")
@@ -752,7 +753,7 @@ async def run_path_trace(req: PathTraceRequest) -> JSONResponse:
             topology_data = {"devices": [], "links": []}
 
     try:
-        hops = await trace_path(
+        result = await trace_path(
             topology_data=topology_data,
             source_id=req.source_device_id,
             dest_ip=req.destination_ip,
@@ -760,9 +761,73 @@ async def run_path_trace(req: PathTraceRequest) -> JSONResponse:
             password=req.password,
             mock_mode=req.mock_mode,
         )
-        return JSONResponse({"hops": hops})
+        if isinstance(result, dict):
+            return JSONResponse(result)
+        return JSONResponse({"hops": result})
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/poll/all")
+async def trigger_poll_all() -> JSONResponse:
+    """
+    Triggers an immediate polling cycle across all devices in the active topology.
+    """
+    statuses = await poller.poll_now()
+    return JSONResponse({
+        "status": "ok",
+        "devices_polled": len(statuses),
+        "statuses": statuses,
+    })
+
+
+@app.post("/api/poll/device/{device_id}")
+async def trigger_poll_device(device_id: str) -> JSONResponse:
+    """
+    Triggers an immediate polling query for an individual device.
+    """
+    telemetry = await poller.poll_device(device_id)
+    if telemetry is None:
+        raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found in active topology")
+    return JSONResponse({
+        "status": "ok",
+        "device_id": device_id,
+        "telemetry": telemetry,
+    })
+
+
+@app.get("/api/topology/ipam")
+async def get_topology_ipam() -> JSONResponse:
+    """
+    Returns enterprise IPAM analysis for all devices and configured interfaces.
+    """
+    if manager.latest_topology is not None:
+        topology_data = manager.latest_topology
+    else:
+        try:
+            topology_data = json.loads(SAMPLE_PATH.read_text())
+        except Exception:
+            topology_data = {"devices": [], "links": []}
+
+    ipam_data = analyze_topology_subnets(topology_data)
+    return JSONResponse(ipam_data)
+
+
+@app.get("/api/topology/overview")
+async def get_topology_overview() -> JSONResponse:
+    """
+    Returns enterprise NOC overview KPIs (devices health, link status, CIS security score).
+    """
+    if manager.latest_topology is not None:
+        topology_data = manager.latest_topology
+    else:
+        try:
+            topology_data = json.loads(SAMPLE_PATH.read_text())
+        except Exception:
+            topology_data = {"devices": [], "links": []}
+
+    overview_data = compute_topology_overview(topology_data, poller.device_states)
+    return JSONResponse(overview_data)
 
 
 def get_device_mock_config(device_id: str, label: str, ip: str, platform: str) -> str:

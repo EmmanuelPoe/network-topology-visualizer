@@ -1,6 +1,7 @@
 import re
 import ipaddress
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -319,18 +320,27 @@ def audit_topology(topology: Dict[str, Any]) -> Dict[str, Any]:
                         "severity": "CRITICAL",
                         "title": "Insecure Management Protocol (Telnet) Allowed",
                         "description": "Telnet is enabled on VTY lines 0-15. Replace with SSH ('transport input ssh').",
+                        "cis_rule_id": "CIS-Cisco-2.1.1",
+                        "framework": "CIS Controls / NIST AC-17",
+                        "remediation_cli": "line vty 0 15\n transport input ssh\n login local",
                     },
                     {
                         "category": "Security",
                         "severity": "HIGH",
                         "title": "Weak SNMP Community String (public)",
                         "description": "Default SNMP read-only community string 'public' is active.",
+                        "cis_rule_id": "CIS-Cisco-3.2.1",
+                        "framework": "CIS Controls / NIST IA-2",
+                        "remediation_cli": "no snmp-server community public\nsnmp-server group SECGROUP v3 priv\nsnmp-server user SECUSER SECGROUP v3 auth sha StrongAuthKey priv aes 128 StrongPrivKey",
                     },
                     {
                         "category": "Best Practice",
                         "severity": "INFO",
                         "title": "Syslog Logging Disabled",
                         "description": "No external syslog logging destination is configured.",
+                        "cis_rule_id": "CIS-Cisco-4.1.1",
+                        "framework": "CIS Controls / NIST AU-6",
+                        "remediation_cli": "logging host 10.0.0.50\nlogging trap informational\nservice timestamps log datetime msec",
                     },
                 ]
             elif dev_id == "fw-01":
@@ -340,12 +350,18 @@ def audit_topology(topology: Dict[str, Any]) -> Dict[str, Any]:
                         "severity": "HIGH",
                         "title": "Password Encryption Disabled",
                         "description": "Global cleartext password encryption is not configured.",
+                        "cis_rule_id": "CIS-Cisco-1.1.4",
+                        "framework": "CIS Controls / NIST IA-5",
+                        "remediation_cli": "service password-encryption",
                     },
                     {
                         "category": "Best Practice",
                         "severity": "INFO",
                         "title": "Missing Login Banner (MOTD)",
                         "description": "No message of the day login banner configured.",
+                        "cis_rule_id": "CIS-Cisco-1.3.1",
+                        "framework": "CIS Controls / NIST AC-8",
+                        "remediation_cli": "banner motd ^C\n=======================================================\nAUTHORIZED ENTERPRISE ACCESS ONLY - ALL ACTIVITIES MONITORED\n=======================================================^C",
                     },
                 ]
             else:
@@ -532,6 +548,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "An unhashed/cleartext enable password is configured. Use 'enable secret' instead.",
                 "cis_rule_id": "CIS-Cisco-1.1.2",
                 "framework": "CIS Controls / NIST IA-5",
+                "remediation_cli": "enable secret <strong-password>\nno enable password",
             }
         )
     # Check for service password-encryption being disabled
@@ -548,6 +565,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "Cleartext password encryption is disabled ('no service password-encryption'). Unhashed passwords will be exposed in show run.",
                 "cis_rule_id": "CIS-Cisco-1.1.4",
                 "framework": "CIS Controls / NIST IA-5",
+                "remediation_cli": "service password-encryption",
             }
         )
 
@@ -566,6 +584,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "Telnet is permitted on terminal lines (VTY), transmitting credentials in cleartext. Enforce 'transport input ssh' instead.",
                 "cis_rule_id": "CIS-Cisco-2.1.1",
                 "framework": "CIS Controls / NIST AC-17",
+                "remediation_cli": "line vty 0 15\n transport input ssh\n login local",
             }
         )
     # Check for weak SNMP communities
@@ -584,6 +603,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                     "description": f"A default/well-known SNMP community string '{community}' with {access} access is configured. Change it to a secure name.",
                     "cis_rule_id": "CIS-Cisco-3.2.1",
                     "framework": "CIS Controls / NIST IA-2",
+                    "remediation_cli": f"no snmp-server community {community}\nsnmp-server group SECGROUP v3 priv\nsnmp-server user SECUSER SECGROUP v3 auth sha StrongAuthKey priv aes 128 StrongPrivKey",
                 }
             )
 
@@ -602,6 +622,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "No external syslog logging server is configured. Add a 'logging <ip>' directive for security event auditing.",
                 "cis_rule_id": "CIS-Cisco-4.1.1",
                 "framework": "CIS Controls / NIST AU-6",
+                "remediation_cli": "logging host 10.0.0.50\nlogging trap informational\nservice timestamps log datetime msec",
             }
         )
     # Check for login banner
@@ -614,6 +635,7 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "No Message of the Day (MOTD) banner is configured. A banner warning against unauthorized access is recommended for legal compliance.",
                 "cis_rule_id": "CIS-Cisco-1.3.1",
                 "framework": "CIS Controls / NIST AC-8",
+                "remediation_cli": "banner motd ^C\n=======================================================\nAUTHORIZED ENTERPRISE ACCESS ONLY - ALL ACTIVITIES MONITORED\n=======================================================^C",
             }
         )
     # Check for domain-name
@@ -628,7 +650,238 @@ def audit_device_config(config_text: str) -> list[dict]:
                 "description": "No global IP domain-name is configured, which is required for generating SSH host keys.",
                 "cis_rule_id": "CIS-Cisco-2.1.3",
                 "framework": "CIS Controls / NIST SC-8",
+                "remediation_cli": "ip domain-name corp.internal\ncrypto key generate rsa modulus 2048\nip ssh version 2",
             }
         )
 
     return findings
+
+
+def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Enterprise IPAM & Subnet Analyzer.
+    Aggregates all configured IP interfaces across devices and identifies
+    subnets, address assignments, broadcast boundaries, utilization, and duplicate IP conflicts.
+    """
+    devices = topology.get("devices") or topology.get("nodes") or []
+    subnets_map: Dict[str, Dict[str, Any]] = {}
+    all_assigned_ips: Dict[str, list[dict]] = {}
+    conflicts = []
+
+    for dev in devices:
+        dev_id = dev.get("id")
+        dev_label = dev.get("label") or dev.get("name") or dev_id
+        ifaces = dev.get("interfaces", [])
+
+        if isinstance(ifaces, dict):
+            ifaces = list(ifaces.values())
+        elif not ifaces and dev.get("config"):
+            parsed = parse_device_interfaces(dev["config"])
+            ifaces = list(parsed.values())
+
+        for iface in ifaces:
+            ip_str = iface.get("ip")
+            mask_str = iface.get("mask")
+            iface_name = iface.get("name", "Unknown")
+
+            if not ip_str or not mask_str:
+                continue
+
+            try:
+                iface_obj = ipaddress.IPv4Interface(f"{ip_str}/{mask_str}")
+                net_obj = iface_obj.network
+                cidr_str = str(net_obj)
+
+                ip_clean = str(iface_obj.ip)
+                if ip_clean not in all_assigned_ips:
+                    all_assigned_ips[ip_clean] = []
+                all_assigned_ips[ip_clean].append({
+                    "device_id": dev_id,
+                    "node_id": dev_id,
+                    "device_label": dev_label,
+                    "interface": iface_name,
+                })
+
+                if cidr_str not in subnets_map:
+                    num_addresses = net_obj.num_addresses
+                    if net_obj.prefixlen == 32:
+                        usable_hosts = 1
+                        usable_range = str(net_obj.network_address)
+                    elif net_obj.prefixlen == 31:
+                        usable_hosts = 2
+                        usable_range = f"{net_obj.network_address} - {net_obj.broadcast_address}"
+                    else:
+                        usable_hosts = max(0, num_addresses - 2)
+                        usable_range = f"{net_obj.network_address + 1} - {net_obj.broadcast_address - 1}"
+
+                    subnets_map[cidr_str] = {
+                        "cidr": cidr_str,
+                        "network": cidr_str,
+                        "network_address": str(net_obj.network_address),
+                        "netmask": str(net_obj.netmask),
+                        "wildcard": str(net_obj.hostmask),
+                        "broadcast": str(net_obj.broadcast_address),
+                        "prefix_len": net_obj.prefixlen,
+                        "total_hosts": usable_hosts,
+                        "usable_hosts": usable_hosts,
+                        "usable_range": usable_range,
+                        "assignments": [],
+                        "interfaces": [],
+                        "has_conflict": False,
+                        "conflict_details": None,
+                    }
+
+                assignment_entry = {
+                    "device_id": dev_id,
+                    "node_id": dev_id,
+                    "device_label": dev_label,
+                    "interface": iface_name,
+                    "ip": ip_clean,
+                }
+                subnets_map[cidr_str]["assignments"].append(assignment_entry)
+                subnets_map[cidr_str]["interfaces"].append(assignment_entry)
+            except Exception as e:
+                logger.debug(f"IPAM parse error for {ip_str}/{mask_str}: {e}")
+
+    # Check for IP conflicts (same IP on multiple interfaces)
+    for ip, assigned_list in all_assigned_ips.items():
+        if len(assigned_list) > 1:
+            dev_refs = ", ".join(f"{a['device_label']}:{a['interface']}" for a in assigned_list)
+            conflict_msg = f"Duplicate IP Conflict detected: {ip} is assigned to multiple interfaces ({dev_refs})"
+            conflicts.append({
+                "ip": ip,
+                "message": conflict_msg,
+                "targets": assigned_list,
+                "devices": assigned_list,
+            })
+            for cidr, sdata in subnets_map.items():
+                for a in sdata["assignments"]:
+                    if a["ip"] == ip:
+                        sdata["has_conflict"] = True
+                        sdata["conflict_details"] = conflict_msg
+
+    subnet_list = []
+    for cidr_str, sdata in subnets_map.items():
+        assigned_count = len(sdata["assignments"])
+        sdata["assigned_hosts"] = assigned_count
+        sdata["allocated_count"] = assigned_count
+        if sdata["total_hosts"] > 0:
+            util_pct = round(min(100.0, (assigned_count / sdata["total_hosts"]) * 100.0), 1)
+        else:
+            util_pct = 100.0
+        sdata["utilization_pct"] = util_pct
+        sdata["utilization_percent"] = util_pct
+        subnet_list.append(sdata)
+
+    def sort_key(s):
+        try:
+            return ipaddress.IPv4Network(s["cidr"]).network_address
+        except Exception:
+            return 0
+
+    subnet_list.sort(key=sort_key)
+    total_assigned = sum(len(s["assignments"]) for s in subnet_list)
+
+    return {
+        "total_subnets": len(subnet_list),
+        "total_ips_assigned": total_assigned,
+        "conflicts_count": len(conflicts),
+        "conflicts": conflicts,
+        "subnets": subnet_list,
+    }
+
+
+def compute_topology_overview(topology: Dict[str, Any], poller_states: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Computes high-level NOC dashboard KPIs:
+    - Device health (online, offline, degraded)
+    - Link health (healthy, MTU/VLAN/Subnet/Speed mismatches)
+    - Security & CIS Compliance score (%)
+    - IPAM subnet count and conflicts
+    """
+    devices = topology.get("devices") or topology.get("nodes") or []
+    links = topology.get("links", [])
+    poller_states = poller_states or {}
+
+    total_devices = len(devices)
+    online_count = 0
+    offline_count = 0
+    packet_loss_count = 0
+
+    for dev in devices:
+        dev_id = dev.get("id")
+        pstate = poller_states.get(dev_id)
+        if pstate:
+            is_online = pstate.get("online") if "online" in pstate else pstate.get("is_alive", True)
+            if not is_online:
+                offline_count += 1
+            else:
+                online_count += 1
+                if pstate.get("packet_loss", 0) > 0:
+                    packet_loss_count += 1
+        else:
+            dev_status = dev.get("status", "online")
+            if dev_status == "offline":
+                offline_count += 1
+            else:
+                online_count += 1
+
+    total_links = len(links)
+    mismatch_links_count = 0
+    for l in links:
+        if (
+            l.get("vlan_mismatch")
+            or l.get("subnet_mismatch")
+            or l.get("mtu_mismatch")
+            or l.get("speed_mismatch")
+            or (l.get("warnings") and len(l["warnings"]) > 0)
+        ):
+            mismatch_links_count += 1
+
+    total_findings = 0
+    crit_count = 0
+    high_count = 0
+    info_count = 0
+
+    for dev in devices:
+        for f in dev.get("audit_findings", []):
+            total_findings += 1
+            sev = f.get("severity", "").upper()
+            if sev == "CRITICAL":
+                crit_count += 1
+            elif sev == "HIGH":
+                high_count += 1
+            else:
+                info_count += 1
+
+    deduction = (crit_count * 15) + (high_count * 8) + (info_count * 2)
+    compliance_score = max(10, min(100, 100 - deduction)) if total_devices > 0 else 100
+
+    ipam_summary = analyze_topology_subnets(topology)
+
+    return {
+        "devices": {
+            "total": total_devices,
+            "online": online_count,
+            "offline": offline_count,
+            "packet_loss": packet_loss_count,
+        },
+        "links": {
+            "total": total_links,
+            "nominal": total_links - mismatch_links_count,
+            "mismatches": mismatch_links_count,
+        },
+        "compliance": {
+            "score_pct": compliance_score,
+            "cis_score_percent": compliance_score,
+            "total_findings": total_findings,
+            "critical": crit_count,
+            "high": high_count,
+            "info": info_count,
+        },
+        "ipam": {
+            "subnets_count": ipam_summary.get("total_subnets", 0),
+            "conflicts_count": ipam_summary.get("conflicts_count", 0),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
