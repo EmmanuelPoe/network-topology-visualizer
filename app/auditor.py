@@ -671,15 +671,22 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
     for dev in devices:
         dev_id = dev.get("id")
         dev_label = dev.get("label") or dev.get("name") or dev_id
-        ifaces = dev.get("interfaces", [])
-
+        ifaces = dev.get("interfaces")
         if isinstance(ifaces, dict):
             ifaces = list(ifaces.values())
         elif not ifaces and dev.get("config"):
             parsed = parse_device_interfaces(dev["config"])
             ifaces = list(parsed.values())
+        elif not ifaces:
+            std = get_mock_interfaces_for_demo(dev_id)
+            if std:
+                ifaces = list(std.values())
+            else:
+                ifaces = []
 
         for iface in ifaces:
+            if not isinstance(iface, dict):
+                continue
             ip_str = iface.get("ip")
             mask_str = iface.get("mask")
             iface_name = iface.get("name", "Unknown")
