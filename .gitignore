@@ -37,3 +37,21 @@ htmlcov/
 
 # Temporary logs
 uvicorn.log
+
+# --- Secrets & credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ecdsa*
+id_ed25519*
+.aws/
+credentials.json
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
