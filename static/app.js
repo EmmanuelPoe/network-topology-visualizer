@@ -1785,7 +1785,7 @@ function openPathTraceModal() {
   if (selectEl) {
     selectEl.innerHTML = currentTopology.devices.map(d => {
       const layerName = (d.layer || 'N/A').toUpperCase();
-      return `<option value="${d.id}">${d.label} (${d.ip || 'No IP'}) - ${layerName}</option>`;
+      return `<option value="${escapeHtml(String(d.id))}">${escapeHtml(String(d.label ?? ''))} (${escapeHtml(String(d.ip || 'No IP'))}) - ${escapeHtml(layerName)}</option>`;
     }).join('');
     if (selectedNodeId) {
       selectEl.value = selectedNodeId;

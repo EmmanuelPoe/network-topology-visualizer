@@ -7,7 +7,7 @@ setup:
 	@echo "Virtual environment created and dependencies synced."
 
 run:
-	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uv run uvicorn app.main:app --reload --host $${HOST:-127.0.0.1} --port 8000
 
 lint:
 	uv run ruff check .
