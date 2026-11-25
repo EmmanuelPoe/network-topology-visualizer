@@ -702,12 +702,14 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
                 ip_clean = str(iface_obj.ip)
                 if ip_clean not in all_assigned_ips:
                     all_assigned_ips[ip_clean] = []
-                all_assigned_ips[ip_clean].append({
-                    "device_id": dev_id,
-                    "node_id": dev_id,
-                    "device_label": dev_label,
-                    "interface": iface_name,
-                })
+                all_assigned_ips[ip_clean].append(
+                    {
+                        "device_id": dev_id,
+                        "node_id": dev_id,
+                        "device_label": dev_label,
+                        "interface": iface_name,
+                    }
+                )
 
                 if cidr_str not in subnets_map:
                     num_addresses = net_obj.num_addresses
@@ -716,7 +718,9 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
                         usable_range = str(net_obj.network_address)
                     elif net_obj.prefixlen == 31:
                         usable_hosts = 2
-                        usable_range = f"{net_obj.network_address} - {net_obj.broadcast_address}"
+                        usable_range = (
+                            f"{net_obj.network_address} - {net_obj.broadcast_address}"
+                        )
                     else:
                         usable_hosts = max(0, num_addresses - 2)
                         usable_range = f"{net_obj.network_address + 1} - {net_obj.broadcast_address - 1}"
@@ -753,14 +757,18 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
     # Check for IP conflicts (same IP on multiple interfaces)
     for ip, assigned_list in all_assigned_ips.items():
         if len(assigned_list) > 1:
-            dev_refs = ", ".join(f"{a['device_label']}:{a['interface']}" for a in assigned_list)
+            dev_refs = ", ".join(
+                f"{a['device_label']}:{a['interface']}" for a in assigned_list
+            )
             conflict_msg = f"Duplicate IP Conflict detected: {ip} is assigned to multiple interfaces ({dev_refs})"
-            conflicts.append({
-                "ip": ip,
-                "message": conflict_msg,
-                "targets": assigned_list,
-                "devices": assigned_list,
-            })
+            conflicts.append(
+                {
+                    "ip": ip,
+                    "message": conflict_msg,
+                    "targets": assigned_list,
+                    "devices": assigned_list,
+                }
+            )
             for cidr, sdata in subnets_map.items():
                 for a in sdata["assignments"]:
                     if a["ip"] == ip:
@@ -773,7 +781,9 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
         sdata["assigned_hosts"] = assigned_count
         sdata["allocated_count"] = assigned_count
         if sdata["total_hosts"] > 0:
-            util_pct = round(min(100.0, (assigned_count / sdata["total_hosts"]) * 100.0), 1)
+            util_pct = round(
+                min(100.0, (assigned_count / sdata["total_hosts"]) * 100.0), 1
+            )
         else:
             util_pct = 100.0
         sdata["utilization_pct"] = util_pct
@@ -798,7 +808,9 @@ def analyze_topology_subnets(topology: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def compute_topology_overview(topology: Dict[str, Any], poller_states: Dict[str, Any] = None) -> Dict[str, Any]:
+def compute_topology_overview(
+    topology: Dict[str, Any], poller_states: Dict[str, Any] = None
+) -> Dict[str, Any]:
     """
     Computes high-level NOC dashboard KPIs:
     - Device health (online, offline, degraded)
@@ -819,7 +831,11 @@ def compute_topology_overview(topology: Dict[str, Any], poller_states: Dict[str,
         dev_id = dev.get("id")
         pstate = poller_states.get(dev_id)
         if pstate:
-            is_online = pstate.get("online") if "online" in pstate else pstate.get("is_alive", True)
+            is_online = (
+                pstate.get("online")
+                if "online" in pstate
+                else pstate.get("is_alive", True)
+            )
             if not is_online:
                 offline_count += 1
             else:
@@ -835,13 +851,13 @@ def compute_topology_overview(topology: Dict[str, Any], poller_states: Dict[str,
 
     total_links = len(links)
     mismatch_links_count = 0
-    for l in links:
+    for link in links:
         if (
-            l.get("vlan_mismatch")
-            or l.get("subnet_mismatch")
-            or l.get("mtu_mismatch")
-            or l.get("speed_mismatch")
-            or (l.get("warnings") and len(l["warnings"]) > 0)
+            link.get("vlan_mismatch")
+            or link.get("subnet_mismatch")
+            or link.get("mtu_mismatch")
+            or link.get("speed_mismatch")
+            or (link.get("warnings") and len(link["warnings"]) > 0)
         ):
             mismatch_links_count += 1
 

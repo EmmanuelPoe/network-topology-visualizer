@@ -1,44 +1,12 @@
 from fastapi.testclient import TestClient
+import app.main as main
 from app.main import app
-from pathlib import Path
 import time
-import pytest
-import shutil
 
 client = TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def backup_restore_topology():
-    topology_path = Path(__file__).parent.parent / "sample" / "topology.json"
-    backup_path = Path(__file__).parent.parent / "sample" / "topology.json.bak"
-
-    # Back up the original file if it exists
-    existed = topology_path.exists()
-    if existed:
-        shutil.copy2(topology_path, backup_path)
-
-    yield
-
-    # Restore the original file
-    if existed:
-        shutil.copy2(backup_path, topology_path)
-        if backup_path.exists():
-            backup_path.unlink()
-    elif topology_path.exists():
-        topology_path.unlink()
-
-
 def test_save_and_list_backups():
-    # Clean up backups directory
-    backup_dir = Path(__file__).parent / "sample" / "backups"
-    if backup_dir.exists():
-        for p in backup_dir.glob("topology_*.json"):
-            try:
-                p.unlink()
-            except Exception:
-                pass
-
     # Save a topology to trigger backup creation
     payload = {
         "devices": [
@@ -161,7 +129,7 @@ def test_filename_sanitization():
     assert data["filename"] == "my_test_layout.json"
 
     # Verify file exists on disk
-    sample_dir = Path(__file__).parent.parent / "sample"
+    sample_dir = main.data_dir()
     file_path = sample_dir / "my_test_layout.json"
     assert file_path.exists()
 

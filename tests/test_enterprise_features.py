@@ -1,7 +1,11 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.auditor import analyze_topology_subnets, compute_topology_overview, audit_device_config
+from app.auditor import (
+    analyze_topology_subnets,
+    compute_topology_overview,
+    audit_device_config,
+)
 
 
 def test_analyze_topology_subnets():
@@ -11,21 +15,41 @@ def test_analyze_topology_subnets():
                 "id": "R1",
                 "name": "Router-1",
                 "interfaces": [
-                    {"name": "GigabitEthernet0/0", "ip": "10.0.0.1", "mask": "255.255.255.0"},
-                    {"name": "GigabitEthernet0/1", "ip": "192.168.1.1", "mask": "255.255.255.252"},
-                    {"name": "Loopback0", "ip": "172.16.0.1", "mask": "255.255.255.255"},
+                    {
+                        "name": "GigabitEthernet0/0",
+                        "ip": "10.0.0.1",
+                        "mask": "255.255.255.0",
+                    },
+                    {
+                        "name": "GigabitEthernet0/1",
+                        "ip": "192.168.1.1",
+                        "mask": "255.255.255.252",
+                    },
+                    {
+                        "name": "Loopback0",
+                        "ip": "172.16.0.1",
+                        "mask": "255.255.255.255",
+                    },
                 ],
             },
             {
                 "id": "R2",
                 "name": "Router-2",
                 "interfaces": [
-                    {"name": "GigabitEthernet0/0", "ip": "10.0.0.2", "mask": "255.255.255.0"},
-                    {"name": "GigabitEthernet0/1", "ip": "192.168.1.2", "mask": "255.255.255.252"},
+                    {
+                        "name": "GigabitEthernet0/0",
+                        "ip": "10.0.0.2",
+                        "mask": "255.255.255.0",
+                    },
+                    {
+                        "name": "GigabitEthernet0/1",
+                        "ip": "192.168.1.2",
+                        "mask": "255.255.255.252",
+                    },
                 ],
             },
         ],
-        "links": []
+        "links": [],
     }
 
     result = analyze_topology_subnets(topology)
@@ -65,7 +89,7 @@ def test_analyze_topology_subnets_conflict_detection():
                 ],
             },
         ],
-        "links": []
+        "links": [],
     }
 
     result = analyze_topology_subnets(topology)

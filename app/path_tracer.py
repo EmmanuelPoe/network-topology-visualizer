@@ -104,7 +104,9 @@ def find_all_shortest_paths(
     return shortest_paths
 
 
-def _get_interface_meta(device: Dict[str, Any], iface_name: Optional[str]) -> Dict[str, Any]:
+def _get_interface_meta(
+    device: Dict[str, Any], iface_name: Optional[str]
+) -> Dict[str, Any]:
     """
     Extracts configured MTU, speed, and mode for a specific interface on a device.
     """
@@ -148,9 +150,11 @@ def build_path_hops_and_diagnostics(
     cumulative_latency = 0.0
 
     for i, node_id in enumerate(path_nodes):
-        device = dev_map.get(node_id, {"id": node_id, "label": node_id, "type": "switch"})
-        is_first = (i == 0)
-        is_last = (i == len(path_nodes) - 1)
+        device = dev_map.get(
+            node_id, {"id": node_id, "label": node_id, "type": "switch"}
+        )
+        is_first = i == 0
+        is_last = i == len(path_nodes) - 1
 
         ingress_iface = None
         egress_iface = None
@@ -174,7 +178,9 @@ def build_path_hops_and_diagnostics(
                         "source": node_id,
                         "source_label": device.get("label", node_id),
                         "target": next_node,
-                        "target_label": dev_map.get(next_node, {}).get("label", next_node),
+                        "target_label": dev_map.get(next_node, {}).get(
+                            "label", next_node
+                        ),
                         "bandwidth": bw_str,
                         "bandwidth_bps": bw_bps,
                         "protocol": out_link.get("protocol", "UP"),
@@ -213,44 +219,58 @@ def build_path_hops_and_diagnostics(
                     f"({ingress_iface}: MTU {in_meta['mtu']}). Packets larger than "
                     f"{min(prev_out_meta['mtu'], in_meta['mtu'])}B will fragment or drop."
                 )
-                diagnostics.append({
-                    "type": "mtu_mismatch",
-                    "severity": "warning",
-                    "hop_index": i,
-                    "message": msg,
-                })
-                hop_issues.append(f"Ingress MTU ({in_meta['mtu']}) mismatches peer ({prev_out_meta['mtu']})")
+                diagnostics.append(
+                    {
+                        "type": "mtu_mismatch",
+                        "severity": "warning",
+                        "hop_index": i,
+                        "message": msg,
+                    }
+                )
+                hop_issues.append(
+                    f"Ingress MTU ({in_meta['mtu']}) mismatches peer ({prev_out_meta['mtu']})"
+                )
 
         # Check if node has offline or degraded status
         if device.get("status") == "offline":
-            diagnostics.append({
-                "type": "node_offline",
-                "severity": "critical",
-                "hop_index": i,
-                "device_id": node_id,
-                "message": f"Device {device.get('label', node_id)} is marked OFFLINE in network state.",
-            })
+            diagnostics.append(
+                {
+                    "type": "node_offline",
+                    "severity": "critical",
+                    "hop_index": i,
+                    "device_id": node_id,
+                    "message": f"Device {device.get('label', node_id)} is marked OFFLINE in network state.",
+                }
+            )
             hop_issues.append("Device is offline")
 
-        hop_status = "critical" if any("offline" in is_str.lower() for is_str in hop_issues) else (
-            "warning" if hop_issues else "nominal"
+        hop_status = (
+            "critical"
+            if any("offline" in is_str.lower() for is_str in hop_issues)
+            else ("warning" if hop_issues else "nominal")
         )
 
-        hops.append({
-            "device_id": node_id,
-            "label": device.get("label", node_id),
-            "ip": device.get("ip", "N/A"),
-            "type": device.get("type", "switch"),
-            "layer": device.get("layer", "access"),
-            "ingress_interface": ingress_iface or ("Gi0/1" if not is_first else None),
-            "egress_interface": egress_iface or ("Gi0/1" if not is_last else "Gi0/1"),
-            "ingress_mtu": in_meta["mtu"],
-            "egress_mtu": out_meta["mtu"],
-            "link_bandwidth": current_link.get("bandwidth", "1G") if current_link else "N/A",
-            "hop_latency_ms": hop_latency,
-            "status": hop_status,
-            "issues": hop_issues,
-        })
+        hops.append(
+            {
+                "device_id": node_id,
+                "label": device.get("label", node_id),
+                "ip": device.get("ip", "N/A"),
+                "type": device.get("type", "switch"),
+                "layer": device.get("layer", "access"),
+                "ingress_interface": ingress_iface
+                or ("Gi0/1" if not is_first else None),
+                "egress_interface": egress_iface
+                or ("Gi0/1" if not is_last else "Gi0/1"),
+                "ingress_mtu": in_meta["mtu"],
+                "egress_mtu": out_meta["mtu"],
+                "link_bandwidth": current_link.get("bandwidth", "1G")
+                if current_link
+                else "N/A",
+                "hop_latency_ms": hop_latency,
+                "status": hop_status,
+                "issues": hop_issues,
+            }
+        )
 
     return {
         "hops": hops,
@@ -314,13 +334,15 @@ async def trace_path(
         alternate_paths = []
         for alt_idx, alt_path in enumerate(all_paths[1:], start=1):
             alt_res = build_path_hops_and_diagnostics(alt_path, devices, links)
-            alternate_paths.append({
-                "path_index": alt_idx,
-                "hops": alt_res["hops"],
-                "bottleneck": alt_res["bottleneck"],
-                "cumulative_latency_ms": alt_res["cumulative_latency_ms"],
-                "path_mtu": alt_res["path_mtu"],
-            })
+            alternate_paths.append(
+                {
+                    "path_index": alt_idx,
+                    "hops": alt_res["hops"],
+                    "bottleneck": alt_res["bottleneck"],
+                    "cumulative_latency_ms": alt_res["cumulative_latency_ms"],
+                    "path_mtu": alt_res["path_mtu"],
+                }
+            )
 
         primary_result["alternate_paths"] = alternate_paths
         return primary_result
@@ -425,7 +447,9 @@ async def trace_path(
         dest_device = next(d for d in devices if d["id"] == dest_id)
         ingress_iface = None
         if hops:
-            _, ingress_iface = get_interfaces_between(links, hops[-1]["device_id"], dest_id)
+            _, ingress_iface = get_interfaces_between(
+                links, hops[-1]["device_id"], dest_id
+            )
         hops.append(
             {
                 "device_id": dest_id,

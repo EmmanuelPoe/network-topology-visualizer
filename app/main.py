@@ -5,6 +5,7 @@ import base64
 import asyncio
 import datetime
 import json
+import shutil
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from pathlib import Path
 from collections import deque
+from urllib.parse import urlsplit
 
 import yaml
 from fastapi import (
@@ -25,6 +27,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -54,9 +57,10 @@ except ImportError:
 async def lifespan(app: FastAPI):
     # Load default layout into manager.latest_topology on startup to seed the poller
     try:
-        if SAMPLE_PATH.exists():
+        seed_data_dir()
+        if active_topology_path().exists():
             try:
-                raw = json.loads(SAMPLE_PATH.read_text())
+                raw = json.loads(active_topology_path().read_text())
                 manager.latest_topology = parse_topology(raw)
             except Exception:
                 pass
@@ -72,18 +76,34 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Network Topology Visualizer", lifespan=lifespan)
 
-# CORS — configurable via CORS_ORIGINS env variable (comma-separated).
-# Defaults to same-origin ("*") for development convenience.
-from fastapi.middleware.cors import CORSMiddleware
+# CORS — off by default: the UI is served by this app, so its requests are
+# same-origin and need no CORS headers. Set CORS_ORIGINS (comma-separated, exact
+# origins such as https://noc.example.com) only if another site must call the API.
+# A wildcard is never combined with credentials.
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+]
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials="*" not in ALLOWED_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-_cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """Block cross-site WebSocket hijacking: browsers always send Origin, and CORS
+    does not apply to WebSockets. Allow same-origin pages, configured CORS_ORIGINS,
+    and non-browser clients (no Origin header)."""
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    if urlsplit(origin).netloc == websocket.headers.get("host", ""):
+        return True
+    return origin in ALLOWED_ORIGINS or "*" in ALLOWED_ORIGINS
+
 
 app.mount(
     "/static",
@@ -91,7 +111,35 @@ app.mount(
     name="static",
 )
 
-SAMPLE_PATH = Path(__file__).parent.parent / "sample" / "topology.json"
+BUNDLED_SAMPLE_DIR = Path(__file__).parent.parent / "sample"
+
+# Where saved layouts, the active topology.json and backups live. Defaults to the
+# gitignored data/ directory so real topologies never land in git; on first start it
+# is seeded with copies of the bundled sample/*.json files. Override with
+# TOPOLOGY_DATA_DIR. Tests point this at a temp dir.
+DATA_DIR = Path(os.getenv("TOPOLOGY_DATA_DIR") or Path(__file__).parent.parent / "data")
+
+
+def seed_data_dir() -> None:
+    """Create the data dir and copy in bundled layouts that are not there yet."""
+    target = data_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    if target.resolve() == BUNDLED_SAMPLE_DIR.resolve():
+        return
+    for src in BUNDLED_SAMPLE_DIR.glob("*.json"):
+        dest = target / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+
+
+def data_dir() -> Path:
+    """Current layout storage directory (read at call time so tests can override it)."""
+    return DATA_DIR
+
+
+def active_topology_path() -> Path:
+    return data_dir() / "topology.json"
+
 
 # Optional bearer-token protection for /api/push.
 # Set the TOPOLOGY_API_KEY environment variable to enable it.
@@ -283,7 +331,7 @@ async def index() -> HTMLResponse:
 
 @app.get("/api/sample")
 async def get_sample() -> JSONResponse:
-    raw = json.loads(SAMPLE_PATH.read_text())
+    raw = json.loads(active_topology_path().read_text())
     return JSONResponse(parse_topology(raw))
 
 
@@ -387,7 +435,7 @@ async def discover_topology(req: DiscoverRequest) -> JSONResponse:
 @app.get("/api/layouts")
 async def list_layouts() -> JSONResponse:
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         files = []
         for p in sample_dir.glob("*.json"):
             files.append(p.name)
@@ -403,7 +451,7 @@ async def list_layouts() -> JSONResponse:
 @app.get("/api/layouts/{filename}")
 async def get_layout(filename: str) -> JSONResponse:
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         safe_path = (sample_dir / filename).resolve()
         if not safe_path.is_relative_to(sample_dir.resolve()):
             raise HTTPException(status_code=400, detail="Invalid filename")
@@ -429,7 +477,7 @@ async def get_layout(filename: str) -> JSONResponse:
 @app.delete("/api/layouts/{filename}")
 async def delete_layout(filename: str) -> JSONResponse:
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         safe_path = (sample_dir / filename).resolve()
 
         # Block deleting default topology layout
@@ -457,7 +505,7 @@ async def delete_layout(filename: str) -> JSONResponse:
 @app.patch("/api/layouts/{filename}")
 async def rename_layout(filename: str, new_name: str) -> JSONResponse:
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         safe_path = (sample_dir / filename).resolve()
 
         # Block renaming default topology layout
@@ -512,7 +560,7 @@ async def rename_layout(filename: str, new_name: str) -> JSONResponse:
 @app.post("/api/save")
 async def save_topology(req: Topology, name: Optional[str] = None) -> JSONResponse:
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         if name:
             suffix = ".json"
             name_lower = name.lower()
@@ -554,7 +602,9 @@ async def save_topology(req: Topology, name: Optional[str] = None) -> JSONRespon
 
         # Prune old backups — keep only the 50 most recent
         max_backups = 50
-        all_backups = sorted(backup_dir.glob("topology_*.json"), key=lambda p: p.stat().st_mtime)
+        all_backups = sorted(
+            backup_dir.glob("topology_*.json"), key=lambda p: p.stat().st_mtime
+        )
         if len(all_backups) > max_backups:
             for old in all_backups[: len(all_backups) - max_backups]:
                 old.unlink(missing_ok=True)
@@ -662,7 +712,7 @@ async def run_runbook(req: RunbookRequest) -> JSONResponse:
         topology_data = manager.latest_topology
     else:
         try:
-            topology_data = json.loads(SAMPLE_PATH.read_text())
+            topology_data = json.loads(active_topology_path().read_text())
         except Exception:
             topology_data = {"devices": [], "links": []}
 
@@ -748,7 +798,7 @@ async def run_path_trace(req: PathTraceRequest) -> JSONResponse:
         topology_data = manager.latest_topology
     else:
         try:
-            topology_data = json.loads(SAMPLE_PATH.read_text())
+            topology_data = json.loads(active_topology_path().read_text())
         except Exception:
             topology_data = {"devices": [], "links": []}
 
@@ -774,11 +824,13 @@ async def trigger_poll_all() -> JSONResponse:
     Triggers an immediate polling cycle across all devices in the active topology.
     """
     statuses = await poller.poll_now()
-    return JSONResponse({
-        "status": "ok",
-        "devices_polled": len(statuses),
-        "statuses": statuses,
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "devices_polled": len(statuses),
+            "statuses": statuses,
+        }
+    )
 
 
 @app.post("/api/poll/device/{device_id}")
@@ -788,12 +840,16 @@ async def trigger_poll_device(device_id: str) -> JSONResponse:
     """
     telemetry = await poller.poll_device(device_id)
     if telemetry is None:
-        raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found in active topology")
-    return JSONResponse({
-        "status": "ok",
-        "device_id": device_id,
-        "telemetry": telemetry,
-    })
+        raise HTTPException(
+            status_code=404, detail=f"Device '{device_id}' not found in active topology"
+        )
+    return JSONResponse(
+        {
+            "status": "ok",
+            "device_id": device_id,
+            "telemetry": telemetry,
+        }
+    )
 
 
 @app.get("/api/topology/ipam")
@@ -805,7 +861,7 @@ async def get_topology_ipam() -> JSONResponse:
         topology_data = manager.latest_topology
     else:
         try:
-            topology_data = json.loads(SAMPLE_PATH.read_text())
+            topology_data = json.loads(active_topology_path().read_text())
         except Exception:
             topology_data = {"devices": [], "links": []}
 
@@ -822,7 +878,7 @@ async def get_topology_overview() -> JSONResponse:
         topology_data = manager.latest_topology
     else:
         try:
-            topology_data = json.loads(SAMPLE_PATH.read_text())
+            topology_data = json.loads(active_topology_path().read_text())
         except Exception:
             topology_data = {"devices": [], "links": []}
 
@@ -852,7 +908,7 @@ end
 @app.get("/api/backups")
 async def list_backups() -> JSONResponse:
     try:
-        backup_dir = Path(__file__).parent.parent / "sample" / "backups"
+        backup_dir = data_dir() / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         backups = []
@@ -874,7 +930,7 @@ async def list_backups() -> JSONResponse:
 @app.get("/api/layouts/backups/{filename}")
 async def get_backup_layout(filename: str) -> JSONResponse:
     try:
-        backup_dir = Path(__file__).parent.parent / "sample" / "backups"
+        backup_dir = data_dir() / "backups"
         safe_path = (backup_dir / filename).resolve()
         if not safe_path.is_relative_to(backup_dir.resolve()):
             raise HTTPException(status_code=400, detail="Invalid filename")
@@ -899,13 +955,12 @@ async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONRespons
     import difflib
 
     try:
-        sample_dir = Path(__file__).parent.parent / "sample"
+        sample_dir = data_dir()
         backup_dir = sample_dir / "backups"
 
         # Resolve p1
-        if (
-            file1 == "topology.json"
-            or ("/" not in file1 and not file1.startswith("topology_"))
+        if file1 == "topology.json" or (
+            "/" not in file1 and not file1.startswith("topology_")
         ):
             p1 = (sample_dir / file1).resolve()
             if not p1.is_relative_to(sample_dir.resolve()):
@@ -916,9 +971,8 @@ async def get_backup_diff(device_id: str, file1: str, file2: str) -> JSONRespons
                 raise HTTPException(status_code=400, detail="Invalid backup file name")
 
         # Resolve p2
-        if (
-            file2 == "topology.json"
-            or ("/" not in file2 and not file2.startswith("topology_"))
+        if file2 == "topology.json" or (
+            "/" not in file2 and not file2.startswith("topology_")
         ):
             p2 = (sample_dir / file2).resolve()
             if not p2.is_relative_to(sample_dir.resolve()):
@@ -995,6 +1049,9 @@ async def ws_topology(websocket: WebSocket) -> None:
     On connect, immediately sends the latest pushed topology (if any).
     Subsequent updates arrive whenever POST /api/push is called.
     """
+    if not websocket_origin_allowed(websocket):
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket)
     try:
         # Immediately hydrate the new client with the current topology
@@ -1335,10 +1392,15 @@ async def ws_terminal(
     mode: str = "mock",
     ip: Optional[str] = None,
     platform: str = "cisco_ios",
-    username: Optional[str] = None,
-    password: Optional[str] = None,
 ) -> None:
+    if not websocket_origin_allowed(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
+    # Credentials arrive only in the first message (never in the URL, where they
+    # would end up in access logs and browser history).
+    username: Optional[str] = None
+    password: Optional[str] = None
 
     # Wait for secure initialization connect packet
     try:
@@ -1355,7 +1417,7 @@ async def ws_terminal(
                 mode = init_packet.get("mode")
     except Exception as exc:
         logger.warning(
-            f"Did not receive secure connect payload: {exc}. Using query parameters."
+            f"Did not receive connect payload: {exc}. Continuing without credentials."
         )
 
     # Load current topology to hydrate mock discovery values
@@ -1363,7 +1425,7 @@ async def ws_terminal(
         topology_data = manager.latest_topology
     else:
         try:
-            topology_data = json.loads(SAMPLE_PATH.read_text())
+            topology_data = json.loads(active_topology_path().read_text())
         except Exception:
             topology_data = {"devices": [], "links": []}
 
@@ -1667,7 +1729,7 @@ async def export_file(
     # Sanitize filename to prevent header injection via " or CRLF
     import re as _re
 
-    safe_filename = _re.sub(r'[^\w._-]', '_', filename)
+    safe_filename = _re.sub(r"[^\w._-]", "_", filename)
     if not safe_filename:
         safe_filename = "export"
 
@@ -1689,6 +1751,7 @@ async def export_executive_report(format: str = "markdown") -> Response:
         "links": [],
     }
     from app.auditor import audit_topology
+
     audit_results = audit_topology(topo)
     devices = audit_results.get("devices", [])
     links = audit_results.get("links", [])
@@ -1699,9 +1762,9 @@ async def export_executive_report(format: str = "markdown") -> Response:
     total_interfaces = 0
     for d in devices:
         t = d.get("type", "unknown")
-        l = d.get("layer", "unknown")
+        layer = d.get("layer", "unknown")
         by_type[t] = by_type.get(t, 0) + 1
-        by_layer[l] = by_layer.get(l, 0) + 1
+        by_layer[layer] = by_layer.get(layer, 0) + 1
         total_interfaces += len(d.get("interfaces", []))
         for f in d.get("audit_findings", []):
             finding_copy = dict(f)
@@ -1717,14 +1780,18 @@ async def export_executive_report(format: str = "markdown") -> Response:
 
     if format.lower() == "html":
         # Build clean HTML Executive Summary
-        devices_rows = "".join([
-            f"<tr><td><code>{d.get('id')}</code></td><td><strong>{d.get('label')}</strong></td><td>{d.get('type','').capitalize()}</td><td>{d.get('layer','').capitalize()}</td><td><code>{d.get('ip','N/A')}</code></td><td>{len(d.get('interfaces',[]))}</td></tr>"
-            for d in devices
-        ])
-        findings_rows = "".join([
-            f"<tr><td><span class='badge badge-{f.get('severity','').lower()}'>{f.get('severity')}</span></td><td><code>{f.get('cis_rule_id','N/A')}</code></td><td><strong>{f.get('title')}</strong></td><td>{f.get('device_id','Topology')}</td><td>{f.get('description')}</td></tr>"
-            for f in findings
-        ])
+        devices_rows = "".join(
+            [
+                f"<tr><td><code>{d.get('id')}</code></td><td><strong>{d.get('label')}</strong></td><td>{d.get('type', '').capitalize()}</td><td>{d.get('layer', '').capitalize()}</td><td><code>{d.get('ip', 'N/A')}</code></td><td>{len(d.get('interfaces', []))}</td></tr>"
+                for d in devices
+            ]
+        )
+        findings_rows = "".join(
+            [
+                f"<tr><td><span class='badge badge-{f.get('severity', '').lower()}'>{f.get('severity')}</span></td><td><code>{f.get('cis_rule_id', 'N/A')}</code></td><td><strong>{f.get('title')}</strong></td><td>{f.get('device_id', 'Topology')}</td><td>{f.get('description')}</td></tr>"
+                for f in findings
+            ]
+        )
 
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1756,7 +1823,7 @@ async def export_executive_report(format: str = "markdown") -> Response:
     <div class="card"><div>Total Devices</div><div class="val">{len(devices)}</div></div>
     <div class="card"><div>Network Links</div><div class="val">{len(links)}</div></div>
     <div class="card"><div>Total Interfaces</div><div class="val">{total_interfaces}</div></div>
-    <div class="card"><div>Security Audit Issues</div><div class="val" style="color: {'#ff7b72' if crit_count > 0 else '#58a6ff'};">{len(findings)}</div></div>
+    <div class="card"><div>Security Audit Issues</div><div class="val" style="color: {"#ff7b72" if crit_count > 0 else "#58a6ff"};">{len(findings)}</div></div>
   </div>
 
   <h2>1. Device Inventory</h2>
@@ -1777,7 +1844,9 @@ async def export_executive_report(format: str = "markdown") -> Response:
         return Response(
             content=html_content,
             media_type="text/html",
-            headers={"Content-Disposition": 'attachment; filename="topology_executive_report.html"'},
+            headers={
+                "Content-Disposition": 'attachment; filename="topology_executive_report.html"'
+            },
         )
 
     # Markdown format default
@@ -1797,29 +1866,34 @@ async def export_executive_report(format: str = "markdown") -> Response:
     ]
     for d in devices:
         md_lines.append(
-            f"| `{d.get('id')}` | **{d.get('label')}** | {d.get('type','').capitalize()} | {d.get('layer','').capitalize()} | `{d.get('ip','N/A')}` | {len(d.get('interfaces',[]))} |"
+            f"| `{d.get('id')}` | **{d.get('label')}** | {d.get('type', '').capitalize()} | {d.get('layer', '').capitalize()} | `{d.get('ip', 'N/A')}` | {len(d.get('interfaces', []))} |"
         )
 
-    md_lines.extend([
-        "",
-        "## 2. Security Compliance Audit",
-    ])
+    md_lines.extend(
+        [
+            "",
+            "## 2. Security Compliance Audit",
+        ]
+    )
     if not findings:
         md_lines.append("No security or compliance issues detected in active topology.")
     else:
-        md_lines.extend([
-            "| Severity | Rule ID | Title | Target | Framework / Rule Detail |",
-            "|---|---|---|---|---|",
-        ])
+        md_lines.extend(
+            [
+                "| Severity | Rule ID | Title | Target | Framework / Rule Detail |",
+                "|---|---|---|---|---|",
+            ]
+        )
         for f in findings:
             md_lines.append(
-                f"| **{f.get('severity')}** | `{f.get('cis_rule_id','N/A')}` | {f.get('title')} | `{f.get('device_id','Topology')}` | {f.get('description')} |"
+                f"| **{f.get('severity')}** | `{f.get('cis_rule_id', 'N/A')}` | {f.get('title')} | `{f.get('device_id', 'Topology')}` | {f.get('description')} |"
             )
 
     md_content = "\n".join(md_lines)
     return Response(
         content=md_content,
         media_type="text/markdown",
-        headers={"Content-Disposition": 'attachment; filename="topology_executive_report.md"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="topology_executive_report.md"'
+        },
     )
-

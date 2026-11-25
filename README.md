@@ -13,6 +13,10 @@ Upload a network inventory (JSON or YAML) or build one from scratch using the In
 - **Export Capabilities** — Save your visual diagram as **PNG** or **SVG**, or export your custom-drawn network back to a **JSON** file to use in automation workflows.
 - **Live Search & Layer Filtering** — Quickly find specific devices by IP/Name, and toggle between Core, Distribution, Access, and Edge views.
 - **Dual-Mode Console Shell** — Switch between a stateful Mock router CLI shell or a real Netmiko SSH proxy console connection (with active PTY resize, command history, and canvas path tracing).
+- **SSH Neighbor Discovery** — start from a seed device and build the topology from CDP/LLDP neighbors (Netmiko + TextFSM), or use mock discovery for demos.
+- **Live Reachability** — background TCP checks (port 22) mark devices up/down with latency.
+- **Operations Tools** — runbooks (run commands across devices), path trace with per-hop diagnostics, config audits, IPAM/subnet analysis, topology overview, report export.
+- **Layout History** — every save keeps a timestamped backup; compare any two versions of a device's config.
 
 ## System Architecture
 
@@ -106,3 +110,38 @@ make run
 # Open http://localhost:8000
 # Upload your inventory JSON, use the sample topology, or draw your own!
 ```
+
+The server listens on `127.0.0.1` only. To reach it from other machines, run `HOST=0.0.0.0 make run` — but put it behind an authenticating reverse proxy first (see Security).
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `HOST` | `127.0.0.1` | bind address for `make run` |
+| `TOPOLOGY_DATA_DIR` | `data/` | where saved layouts, the active `topology.json` and backups are stored; seeded from `sample/*.json` on first start |
+| `TOPOLOGY_API_KEY` | unset | when set, `POST /api/push` requires a matching `X-API-Key` header |
+| `CORS_ORIGINS` | unset (CORS off) | comma-separated exact origins allowed to call the API from another site |
+
+`data/` is gitignored, so saved topologies (which contain real IPs and hostnames) never end up in commits. `sample/` holds only the bundled example layouts.
+
+## Security
+
+This tool can open SSH sessions to network devices, so treat it as an admin tool:
+
+- Device credentials are entered per session and sent in the request body or the first WebSocket message — never in URLs — and are not stored.
+- Only `/api/push` supports an API key; the rest of the API has no authentication. Keep the default localhost binding, or add authentication in front of it.
+- Cross-site requests are blocked: CORS is off unless `CORS_ORIGINS` is set, and the WebSocket endpoints reject connections from other origins.
+- Device-supplied strings (hostnames, interface names, configs) are HTML-escaped before display.
+- vis-network is loaded from unpkg with a Subresource Integrity hash.
+
+## Development
+
+```bash
+make setup              # uv sync (includes pytest, ruff)
+make lint               # ruff check + JSON syntax check
+uv run pytest -q        # tests use a temporary data directory, never sample/ or data/
+```
+
+CI runs lint and tests on every pull request. An optional SSH test router: `docker compose -f docker-compose.test-router.yml up -d`.
+
+Agent and contributor docs: [CLAUDE.md](CLAUDE.md) and [docs/](docs/).
