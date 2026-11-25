@@ -2,7 +2,6 @@ import asyncio
 import time
 import json
 import logging
-import random
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -134,9 +133,13 @@ class LivePoller:
 
         # Real network device check via TCP 22 (SSH)
         is_online, latency = await check_tcp_port(ip, port=22, timeout=2.0)
-        return self._build_telemetry_dict(device, is_online, latency, protocol="SSH/SNMP")
+        return self._build_telemetry_dict(
+            device, is_online, latency, protocol="SSH/SNMP"
+        )
 
-    async def _generate_simulated_telemetry(self, device: Dict[str, Any]) -> Dict[str, Any]:
+    async def _generate_simulated_telemetry(
+        self, device: Dict[str, Any]
+    ) -> Dict[str, Any]:
         device_id = device.get("id", "")
         hash_val = sum(ord(c) for c in device_id)
         current_minutes = int(time.time() / 60)
@@ -160,11 +163,7 @@ class LivePoller:
 
         await asyncio.sleep(0.01)  # Yield loop
         return self._build_telemetry_dict(
-            device,
-            is_online,
-            latency,
-            protocol="SNMPv2c",
-            hash_seed=hash_val
+            device, is_online, latency, protocol="SNMPv2c", hash_seed=hash_val
         )
 
     def _build_telemetry_dict(
@@ -234,8 +233,12 @@ class LivePoller:
             if_name = iface.get("name", "Gi0/1")
             if_hash = sum(ord(c) for c in (device_id + if_name))
             multiplier = 10.0 if layer in ("core", "edge") else 1.0
-            rx = round(max(0.2, ((if_hash % 45) + ((time_slot % 7) * 2.1)) * multiplier), 1)
-            tx = round(max(0.1, ((if_hash % 30) + ((time_slot % 5) * 1.8)) * multiplier), 1)
+            rx = round(
+                max(0.2, ((if_hash % 45) + ((time_slot % 7) * 2.1)) * multiplier), 1
+            )
+            tx = round(
+                max(0.1, ((if_hash % 30) + ((time_slot % 5) * 1.8)) * multiplier), 1
+            )
 
             interface_rates[if_name] = {
                 "rx_mbps": rx,

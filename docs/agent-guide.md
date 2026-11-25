@@ -10,7 +10,7 @@
 
 **Add a discovery backend**: subclass `DiscoveryEngine` in `app/discovery.py` (see `MockDiscoveryEngine` for the interface), select it in `/api/discover`, and test it through the mock path.
 
-**Move saved layouts out of `sample/`**: introduce a `DATA_DIR` (env-configurable, gitignored), point list/get/save/delete/rename/backups at it, keep `sample/topology.json` as the read-only default, and update tests to use `tmp_path`.
+**Change storage behavior**: go through `data_dir()` / `active_topology_path()` / `seed_data_dir()` in `app/main.py`; never hard-code `sample/` or `data/` paths.
 
 ## Pitfalls
 
@@ -22,4 +22,4 @@
 
 ## Done means
 
-`make lint` passes, the pytest command passes, the feature works in a browser at http://127.0.0.1:8000 with no console errors, new HTML output is escaped, and no saved layouts or device data are staged.
+`make lint`, `uv run ruff format --check .` and `uv run pytest -q` pass, the feature works in a browser at http://127.0.0.1:8000 with no console errors, new HTML output is escaped, and nothing from `data/` is staged.

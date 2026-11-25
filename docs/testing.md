@@ -3,11 +3,15 @@
 ## Run
 
 ```bash
-make setup
-uv run --with pytest --with pytest-asyncio --with httpx pytest -q
+make setup              # uv sync, includes pytest, pytest-asyncio, httpx, ruff
+uv run pytest -q        # 25 passed
+make lint               # ruff check + JSON syntax check
+uv run ruff format --check .
 ```
 
-Current result: **25 passed**. Without `pytest-asyncio`, the two async tests in `tests/test_enterprise_features.py` fail. `pytest`, `pytest-asyncio` and `httpx` are not in the `dev` dependency group yet; add them (`uv add --dev pytest pytest-asyncio httpx`) so `uv run pytest` works on its own. `pyproject.toml` already configures `testpaths = ["tests"]`, `pythonpath = ["."]` and excludes `scratch/`.
+CI (`.github/workflows/ci.yml`) runs `uv sync --locked`, ruff check, ruff format check, the JSON check and pytest on every pull request.
+
+`tests/conftest.py` has an autouse fixture that copies `sample/*.json` into a temp directory and points `app.main.DATA_DIR` at it, so tests never touch `sample/` or `data/`.
 
 ## Suite map
 
@@ -36,7 +40,5 @@ make format
 ## Guidelines
 
 - Tests must not need network access: use `MockDiscoveryEngine`, mock mode for runbooks/terminal, and monkeypatch Netmiko/`check_tcp_port`.
-- Use `tmp_path` and monkeypatch the `sample/` path when testing save/delete, so tests never modify tracked files.
-- **Known issue:** `tests/test_backups.py` saves through the real API, which writes `sample/topology.json` (restored by a fixture) and new `sample/backups/topology_<timestamp>.json` files. Its cleanup looks in `tests/sample/backups` (`Path(__file__).parent`), the wrong directory, so every run leaves untracked backup files in the repo's `sample/backups/`. Delete them before committing (`git status`), and fix the test by pointing storage at `tmp_path`.
+- Storage is isolated automatically by `conftest.py`; use `main.data_dir()` in tests that inspect files.
 - Add a test for every new endpoint (status codes, filename sanitization, error paths). Frontend behavior has no automated tests; check it manually in a browser after changes.
-- There is no CI; consider a GitHub Actions workflow running `make lint` and the pytest command.

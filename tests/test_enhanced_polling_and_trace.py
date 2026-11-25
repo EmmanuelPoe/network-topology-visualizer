@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from app.main import app, manager
 
@@ -16,8 +15,8 @@ def test_poll_all_endpoint():
                 "ip": "10.99.1.1",
                 "interfaces": [
                     {"name": "Gi0/0", "mtu": 1500, "speed": "1000", "mode": "routed"},
-                    {"name": "Gi0/1", "mtu": 1500, "speed": "1000", "mode": "routed"}
-                ]
+                    {"name": "Gi0/1", "mtu": 1500, "speed": "1000", "mode": "routed"},
+                ],
             },
             {
                 "id": "sw-access",
@@ -27,8 +26,8 @@ def test_poll_all_endpoint():
                 "ip": "10.99.1.2",
                 "interfaces": [
                     {"name": "Gi1/0/1", "mtu": 1500, "speed": "1000", "mode": "access"}
-                ]
-            }
+                ],
+            },
         ],
         "links": [
             {
@@ -36,9 +35,9 @@ def test_poll_all_endpoint():
                 "target": "sw-access",
                 "src_iface": "Gi0/0",
                 "dst_iface": "Gi1/0/1",
-                "bandwidth": "1G"
+                "bandwidth": "1G",
             }
-        ]
+        ],
     }
 
     response = client.post("/api/poll/all")
@@ -69,10 +68,10 @@ def test_poll_device_endpoint():
                 "type": "firewall",
                 "layer": "edge",
                 "ip": "10.99.2.1",
-                "interfaces": [{"name": "eth1/1", "mtu": 1500, "mode": "routed"}]
+                "interfaces": [{"name": "eth1/1", "mtu": 1500, "mode": "routed"}],
             }
         ],
-        "links": []
+        "links": [],
     }
 
     # Test existing device
@@ -103,7 +102,7 @@ def test_path_trace_mtu_mismatch_and_bottleneck():
                 "ip": "10.0.1.1",
                 "interfaces": [
                     {"name": "Gi0/0", "mtu": 9000, "speed": "10G", "mode": "routed"}
-                ]
+                ],
             },
             {
                 "id": "d1",
@@ -113,8 +112,8 @@ def test_path_trace_mtu_mismatch_and_bottleneck():
                 "ip": "10.0.1.2",
                 "interfaces": [
                     {"name": "Gi1/0/1", "mtu": 1500, "speed": "10G", "mode": "routed"},
-                    {"name": "Gi1/0/2", "mtu": 1500, "speed": "100M", "mode": "routed"}
-                ]
+                    {"name": "Gi1/0/2", "mtu": 1500, "speed": "100M", "mode": "routed"},
+                ],
             },
             {
                 "id": "a1",
@@ -124,8 +123,8 @@ def test_path_trace_mtu_mismatch_and_bottleneck():
                 "ip": "10.0.1.3",
                 "interfaces": [
                     {"name": "Fa0/1", "mtu": 1500, "speed": "100M", "mode": "access"}
-                ]
-            }
+                ],
+            },
         ],
         "links": [
             {
@@ -133,22 +132,22 @@ def test_path_trace_mtu_mismatch_and_bottleneck():
                 "target": "d1",
                 "src_iface": "Gi0/0",
                 "dst_iface": "Gi1/0/1",
-                "bandwidth": "10G"
+                "bandwidth": "10G",
             },
             {
                 "source": "d1",
                 "target": "a1",
                 "src_iface": "Gi1/0/2",
                 "dst_iface": "Fa0/1",
-                "bandwidth": "100M"
-            }
-        ]
+                "bandwidth": "100M",
+            },
+        ],
     }
 
     payload = {
         "source_device_id": "c1",
         "destination_ip": "10.0.1.3",
-        "mock_mode": True
+        "mock_mode": True,
     }
 
     response = client.post("/api/path-trace", json=payload)
@@ -183,23 +182,47 @@ def test_path_trace_mtu_mismatch_and_bottleneck():
 def test_path_trace_ecmp_alternate_paths():
     manager.latest_topology = {
         "devices": [
-            {"id": "src", "label": "Source", "type": "switch", "layer": "access", "ip": "10.1.1.1"},
-            {"id": "c1", "label": "Core-A", "type": "router", "layer": "core", "ip": "10.1.1.2"},
-            {"id": "c2", "label": "Core-B", "type": "router", "layer": "core", "ip": "10.1.1.3"},
-            {"id": "dst", "label": "Destination", "type": "switch", "layer": "access", "ip": "10.1.1.4"},
+            {
+                "id": "src",
+                "label": "Source",
+                "type": "switch",
+                "layer": "access",
+                "ip": "10.1.1.1",
+            },
+            {
+                "id": "c1",
+                "label": "Core-A",
+                "type": "router",
+                "layer": "core",
+                "ip": "10.1.1.2",
+            },
+            {
+                "id": "c2",
+                "label": "Core-B",
+                "type": "router",
+                "layer": "core",
+                "ip": "10.1.1.3",
+            },
+            {
+                "id": "dst",
+                "label": "Destination",
+                "type": "switch",
+                "layer": "access",
+                "ip": "10.1.1.4",
+            },
         ],
         "links": [
             {"source": "src", "target": "c1", "bandwidth": "10G"},
             {"source": "c1", "target": "dst", "bandwidth": "10G"},
             {"source": "src", "target": "c2", "bandwidth": "10G"},
             {"source": "c2", "target": "dst", "bandwidth": "10G"},
-        ]
+        ],
     }
 
     payload = {
         "source_device_id": "src",
         "destination_ip": "10.1.1.4",
-        "mock_mode": True
+        "mock_mode": True,
     }
 
     response = client.post("/api/path-trace", json=payload)

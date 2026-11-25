@@ -23,7 +23,10 @@ packages = ["app"]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.27",
     "jsonlint>=0.1",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.15.13",
 ]
 

@@ -3,6 +3,7 @@ from app.main import app, manager
 
 client = TestClient(app)
 
+
 def test_export_executive_report_markdown():
     # Setup test topology in manager
     manager.latest_topology = {
@@ -14,12 +15,17 @@ def test_export_executive_report_markdown():
                 "layer": "core",
                 "ip": "10.0.0.1",
                 "interfaces": [
-                    {"name": "Gi0/0", "ip": "10.0.0.1", "mask": "255.255.255.0", "mode": "routed"}
+                    {
+                        "name": "Gi0/0",
+                        "ip": "10.0.0.1",
+                        "mask": "255.255.255.0",
+                        "mode": "routed",
+                    }
                 ],
-                "config": "enable password cisco\nno service password-encryption\n"
+                "config": "enable password cisco\nno service password-encryption\n",
             }
         ],
-        "links": []
+        "links": [],
     }
 
     response = client.get("/api/export/report?format=markdown")
@@ -29,6 +35,7 @@ def test_export_executive_report_markdown():
     assert "# Network Topology & Security Executive Report" in content
     assert "Core-Router-1" in content
     assert "Unencrypted Enable Password" in content or "CIS-Cisco" in content
+
 
 def test_export_executive_report_html():
     manager.latest_topology = {
@@ -40,10 +47,10 @@ def test_export_executive_report_html():
                 "layer": "access",
                 "ip": "10.0.0.2",
                 "interfaces": [],
-                "config": "transport input telnet\n"
+                "config": "transport input telnet\n",
             }
         ],
-        "links": []
+        "links": [],
     }
 
     response = client.get("/api/export/report?format=html")

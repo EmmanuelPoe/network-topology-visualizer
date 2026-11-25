@@ -55,3 +55,7 @@ credentials.json
 *.tfstate.*
 .terraform/
 crash.log
+
+# Saved layouts and backups (runtime data; may contain real topologies)
+data/
+sample/backups/

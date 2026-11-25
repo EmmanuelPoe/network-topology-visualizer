@@ -13,18 +13,20 @@ This app can open SSH sessions to network devices and run commands, so treat it 
 ## Controls in place
 
 - `make run` binds to **127.0.0.1** by default (`HOST=0.0.0.0 make run` exposes it).
-- Layout filenames are sanitized and confined to `sample/`; `topology.json` cannot be deleted or renamed.
-- Path-trace `<select>` options and other device fields are escaped with `escapeHtml()` in `app.js`.
+- **CORS is off by default.** The UI is same-origin; `CORS_ORIGINS` enables CORS for listed exact origins only, and a wildcard is never combined with credentials. (Previously `*` + credentials let any website you visited call the API on localhost.)
+- **WebSocket origin check**: `/ws/topology` and `/ws/terminal/{id}` close cross-site connections with code 1008; same-origin pages and non-browser clients (no `Origin` header) are allowed.
+- **No credentials in URLs**: the terminal WebSocket takes username/password only from its first message, so they never reach access logs or browser history.
+- **Storage outside git**: layouts, the active topology and backups live in `data/` (gitignored) or `TOPOLOGY_DATA_DIR`; tests use a temp dir.
+- **Third-party script integrity**: vis-network 9.1.9 from unpkg is pinned with an SRI `sha384` hash (verified against both the npm package and the live CDN file).
+- Layout filenames are sanitized and confined to the data dir; `topology.json` cannot be deleted or renamed.
+- Device-derived strings are escaped with `escapeHtml()` in `app.js`.
 - `/api/push` can be protected with `TOPOLOGY_API_KEY`.
 
-## Known gaps
+## Remaining risks
 
-1. **No authentication on everything except `/api/push`.** Anyone who can reach the port can read/modify/delete layouts, run discovery, use the server as an SSH relay, and open terminal sessions (given credentials). Keep it on localhost, or put it behind an authenticating reverse proxy before binding to other interfaces.
-2. **Permissive CORS**: `allow_origins=["*"]` with `allow_credentials=True` by default. Verified: a preflight from `Origin: https://evil.example` for `DELETE /api/layouts/...` is answered with that origin and `Allow-Credentials: true`. Combined with no auth, any website you visit can send requests to `http://127.0.0.1:8000` from your browser (e.g. delete or overwrite layouts). Set `CORS_ORIGINS` to the app's own origin, or remove the CORS middleware (same-origin requests do not need it).
-3. **WebSockets are not origin-checked**: a malicious page can open `/ws/topology` or `/ws/terminal/...` to localhost. Check the `Origin` header in both WebSocket handlers.
-4. **Third-party script without integrity**: `templates/index.html` loads vis-network from unpkg without a Subresource Integrity hash. Vendor it into `static/` or add `integrity="sha384-..." crossorigin="anonymous"`.
-5. **Saved data in the repo tree**: "Save to Server" writes into `sample/`, a tracked directory. Real topologies can end up in commits. Consider a separate, gitignored `data/` directory.
-6. **Background polling**: the `LivePoller` starts at boot and TCP-connects to every device in the loaded topology (port 22 by default). Loading a topology with someone else's addresses makes the server probe them.
+1. **No authentication except `/api/push`.** Anyone who can reach the port can read/modify layouts, run discovery and use the server as an SSH relay (with credentials). Keep it on localhost or put an authenticating reverse proxy in front before exposing it.
+2. **Background polling**: the `LivePoller` TCP-connects to every device in the loaded topology (port 22). Loading a topology with someone else's addresses makes the server probe them.
+3. **CDN dependency**: the page needs unpkg reachable; vendoring `vis-network.min.js` into `static/` would remove that dependency (keep the SRI hash if you do).
 
 ## Rules for changes
 
